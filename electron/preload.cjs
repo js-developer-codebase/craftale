@@ -4,23 +4,6 @@ const {
 } = require("electron");
 
 
-/*
-|--------------------------------------------------------------------------
-| Debug
-|--------------------------------------------------------------------------
-*/
-
-console.log(
-    "[PRELOAD] Loaded successfully"
-);
-
-
-/*
-|--------------------------------------------------------------------------
-| Expose Craftale API
-|--------------------------------------------------------------------------
-*/
-
 contextBridge.exposeInMainWorld(
     "craftale",
     {
@@ -33,9 +16,11 @@ contextBridge.exposeInMainWorld(
 
         app: {
 
-            name: "Craftale",
+            name:
+                "Craftale",
 
-            version: "0.1.0"
+            version:
+                "0.1.0"
 
         },
 
@@ -114,6 +99,30 @@ contextBridge.exposeInMainWorld(
                     "filesystem:write-file",
                     filePath,
                     content
+                );
+
+            }
+
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | TERMINAL
+        |--------------------------------------------------------------------------
+        */
+
+        terminal: {
+
+            execute: (
+                command,
+                cwd
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "terminal:execute",
+                    command,
+                    cwd
                 );
 
             }

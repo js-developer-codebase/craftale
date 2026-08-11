@@ -1,10 +1,24 @@
 <script lang="ts">
+
     import FileExplorer
         from "./components/FileExplorer.svelte";
 
 
     import Editor
         from "./components/Editor.svelte";
+
+
+    import Terminal
+        from "./components/Terminal.svelte";
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Terminal State
+    |--------------------------------------------------------------------------
+    */
+
+    let terminalHeight = 250;
 
 </script>
 
@@ -27,13 +41,40 @@
 
     <!--
     |--------------------------------------------------------------------------
-    | Main Editor
+    | Main
     |--------------------------------------------------------------------------
     -->
 
     <main class="main">
 
-        <Editor />
+
+        <!--
+        |--------------------------------------------------------------------------
+        | Editor
+        |--------------------------------------------------------------------------
+        -->
+
+        <section class="editor-area">
+
+            <Editor />
+
+        </section>
+
+
+        <!--
+        |--------------------------------------------------------------------------
+        | Terminal
+        |--------------------------------------------------------------------------
+        -->
+
+        <section
+            class="terminal-area"
+            style={`height: ${terminalHeight}px`}
+        >
+
+            <Terminal />
+
+        </section>
 
     </main>
 
@@ -42,20 +83,32 @@
 
 <style>
 
+    /*
+    |--------------------------------------------------------------------------
+    | Global
+    |--------------------------------------------------------------------------
+    */
+
     :global(html),
     :global(body) {
 
-        margin: 0;
+        width:
+            100%;
 
-        padding: 0;
+        height:
+            100%;
 
-        width: 100%;
+        margin:
+            0;
 
-        height: 100%;
+        padding:
+            0;
 
-        overflow: hidden;
+        overflow:
+            hidden;
 
-        background: #1e1e1e;
+        background:
+            #1e1e1e;
 
     }
 
@@ -63,6 +116,8 @@
     :global(body) {
 
         font-family:
+            Inter,
+            system-ui,
             -apple-system,
             BlinkMacSystemFont,
             "Segoe UI",
@@ -73,52 +128,144 @@
 
     :global(*) {
 
-        box-sizing: border-box;
+        box-sizing:
+            border-box;
 
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | App
+    |--------------------------------------------------------------------------
+    */
 
     .app {
 
-        width: 100vw;
+        width:
+            100vw;
 
-        height: 100vh;
+        height:
+            100vh;
 
-        display: flex;
+        display:
+            flex;
 
-        overflow: hidden;
+        overflow:
+            hidden;
 
-        background: #1e1e1e;
+        background:
+            #1e1e1e;
 
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sidebar
+    |--------------------------------------------------------------------------
+    */
 
     .sidebar {
 
-        width: 280px;
+        width:
+            280px;
 
-        min-width: 200px;
+        min-width:
+            200px;
 
-        max-width: 500px;
+        max-width:
+            500px;
 
-        flex-shrink: 0;
+        flex-shrink:
+            0;
 
-        border-right: 1px solid #333333;
+        overflow:
+            hidden;
 
-        overflow: hidden;
+        border-right:
+            1px solid #333333;
 
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Main
+    |--------------------------------------------------------------------------
+    */
+
     .main {
 
-        flex: 1;
+        flex:
+            1;
 
-        min-width: 0;
+        min-width:
+            0;
 
-        height: 100%;
+        min-height:
+            0;
 
-        overflow: hidden;
+        height:
+            100%;
+
+        display:
+            flex;
+
+        flex-direction:
+            column;
+
+        overflow:
+            hidden;
+
+        background:
+            #1e1e1e;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Editor Area
+    |--------------------------------------------------------------------------
+    */
+
+    .editor-area {
+
+        flex:
+            1;
+
+        min-width:
+            0;
+
+        min-height:
+            0;
+
+        overflow:
+            hidden;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Terminal Area
+    |--------------------------------------------------------------------------
+    */
+
+    .terminal-area {
+
+        flex-shrink:
+            0;
+
+        min-height:
+            150px;
+
+        border-top:
+            1px solid #333333;
+
+        overflow:
+            hidden;
 
     }
 
