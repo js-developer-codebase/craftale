@@ -6,6 +6,14 @@
     } from "svelte";
 
 
+    import * as monaco
+        from "monaco-editor";
+
+
+    import ConfirmModal
+        from "./ConfirmModal.svelte";
+
+
     import {
         openedFiles,
         activeFile,
@@ -14,10 +22,6 @@
         activateFile,
         closeFile
     } from "../stores/workspace";
-
-
-    import * as monaco
-        from "monaco-editor";
 
 
     /*
@@ -42,7 +46,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Models
+    | Monaco Models
     |--------------------------------------------------------------------------
     */
 
@@ -55,13 +59,26 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Prevent Content Change During
-    | Model Switching
+    | Prevent Change During Model Switch
     |--------------------------------------------------------------------------
     */
 
     let switchingModel =
         false;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Close Modal
+    |--------------------------------------------------------------------------
+    */
+
+    let showCloseModal =
+        false;
+
+
+    let filePendingClose:
+        string | null = null;
 
 
     /*
@@ -83,7 +100,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Get Monaco Language
+    | Monaco Language
     |--------------------------------------------------------------------------
     */
 
@@ -101,40 +118,58 @@
         switch (extension) {
 
             case "ts":
-                return "typescript";
 
             case "tsx":
+
                 return "typescript";
 
+
             case "js":
-                return "javascript";
 
             case "jsx":
+
                 return "javascript";
 
+
             case "json":
+
                 return "json";
 
+
             case "css":
+
                 return "css";
 
+
             case "html":
+
                 return "html";
+
 
             case "svelte":
+
                 return "html";
 
+
             case "md":
+
                 return "markdown";
 
+
             case "xml":
+
                 return "xml";
 
+
             case "yml":
+
             case "yaml":
+
                 return "yaml";
 
+
             default:
+
                 return "plaintext";
 
         }
@@ -144,7 +179,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Create Model
+    | Get Or Create Model
     |--------------------------------------------------------------------------
     */
 
@@ -162,12 +197,6 @@
             );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Existing Model
-        |--------------------------------------------------------------------------
-        */
-
         const existingModel =
             models.get(
                 key
@@ -183,23 +212,11 @@
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Create URI
-        |--------------------------------------------------------------------------
-        */
-
         const uri =
             monaco.Uri.file(
                 file.path
             );
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Create Model
-        |--------------------------------------------------------------------------
-        */
 
         const model =
             monaco.editor.createModel(
@@ -228,7 +245,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Show Active File
+    | Show File
     |--------------------------------------------------------------------------
     */
 
@@ -322,7 +339,7 @@
 
         /*
         |--------------------------------------------------------------------------
-        | Make Sure Store Has Latest Content
+        | Update Store
         |--------------------------------------------------------------------------
         */
 
@@ -367,19 +384,13 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Keyboard Handler
+    | Keyboard
     |--------------------------------------------------------------------------
     */
 
     function handleKeyDown(
         event: KeyboardEvent
     ) {
-
-        /*
-        |--------------------------------------------------------------------------
-        | Ctrl + S
-        |--------------------------------------------------------------------------
-        */
 
         if (
             (
@@ -400,7 +411,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Close Tab
+    | Close Tab Click
     |--------------------------------------------------------------------------
     */
 
@@ -412,11 +423,81 @@
         event.stopPropagation();
 
 
+        const file =
+            $openedFiles.find(
+                (item) =>
+                    normalizePath(
+                        item.path
+                    ) ===
+                    normalizePath(
+                        filePath
+                    )
+            );
+
+
+        if (!file) {
+
+            return;
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Clean File
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            !file.isDirty
+        ) {
+
+            performClose(
+                filePath
+            );
+
+            return;
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Dirty File
+        |--------------------------------------------------------------------------
+        */
+
+        filePendingClose =
+            filePath;
+
+
+        showCloseModal =
+            true;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Actually Close File
+    |--------------------------------------------------------------------------
+    */
+
+    function performClose(
+        filePath: string
+    ) {
+
         console.log(
             "[EDITOR] Closing:",
             filePath
         );
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Store
+        |--------------------------------------------------------------------------
+        */
 
         closeFile(
             filePath
@@ -425,7 +506,7 @@
 
         /*
         |--------------------------------------------------------------------------
-        | Dispose Model
+        | Monaco Model
         |--------------------------------------------------------------------------
         */
 
@@ -458,7 +539,133 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Monaco Change Listener
+    | Save And Close
+    |--------------------------------------------------------------------------
+    */
+
+    async function confirmCloseSave() {
+
+        if (
+            !filePendingClose
+        ) {
+
+            return;
+
+        }
+
+
+        const path =
+            filePendingClose;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Save
+        |--------------------------------------------------------------------------
+        */
+
+        const saved =
+            await saveFile(
+                path
+            );
+
+
+        if (!saved) {
+
+            console.error(
+                "[EDITOR] Could not save:",
+                path
+            );
+
+            return;
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Close
+        |--------------------------------------------------------------------------
+        */
+
+        performClose(
+            path
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Reset Modal
+        |--------------------------------------------------------------------------
+        */
+
+        showCloseModal =
+            false;
+
+
+        filePendingClose =
+            null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Close Without Saving
+    |--------------------------------------------------------------------------
+    */
+
+    function confirmCloseWithoutSave() {
+
+        if (
+            !filePendingClose
+        ) {
+
+            return;
+
+        }
+
+
+        const path =
+            filePendingClose;
+
+
+        performClose(
+            path
+        );
+
+
+        showCloseModal =
+            false;
+
+
+        filePendingClose =
+            null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cancel Close
+    |--------------------------------------------------------------------------
+    */
+
+    function cancelClose() {
+
+        showCloseModal =
+            false;
+
+
+        filePendingClose =
+            null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Content Disposable
     |--------------------------------------------------------------------------
     */
 
@@ -478,7 +685,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Component Mount
+    | Mount
     |--------------------------------------------------------------------------
     */
 
@@ -579,11 +786,6 @@
                         );
 
 
-                        console.log(
-                            "[MONACO] Calling updateFileContent..."
-                        );
-
-
                         updateFileContent(
                             path,
                             content
@@ -595,7 +797,7 @@
 
             /*
             |--------------------------------------------------------------------------
-            | Active File Subscription
+            | Active File
             |--------------------------------------------------------------------------
             */
 
@@ -626,7 +828,7 @@
 
             /*
             |--------------------------------------------------------------------------
-            | Ctrl + S
+            | Keyboard
             |--------------------------------------------------------------------------
             */
 
@@ -660,12 +862,6 @@
             activeFileUnsubscribe?.();
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Dispose Models
-            |--------------------------------------------------------------------------
-            */
-
             for (
                 const model
                 of models.values()
@@ -678,12 +874,6 @@
 
             models.clear();
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | Dispose Editor
-            |--------------------------------------------------------------------------
-            */
 
             editor?.dispose();
 
@@ -700,6 +890,7 @@
 -->
 
 <div class="editor">
+
 
     <!--
     |--------------------------------------------------------------------------
@@ -721,6 +912,10 @@
                 }
                 role="tab"
                 tabindex="0"
+                aria-selected={
+                    file.path ===
+                    $activeFile?.path
+                }
                 onclick={() =>
                     activateFile(
                         file.path
@@ -729,8 +924,10 @@
                 onkeydown={(event) => {
 
                     if (
-                        event.key === "Enter" ||
-                        event.key === " "
+                        event.key ===
+                            "Enter" ||
+                        event.key ===
+                            " "
                     ) {
 
                         event.preventDefault();
@@ -745,12 +942,16 @@
             >
 
                 <span class="file-icon">
+
                     📄
+
                 </span>
 
 
                 <span class="file-name">
+
                     {file.name}
+
                 </span>
 
 
@@ -760,15 +961,21 @@
                         class="dirty"
                         title="Unsaved changes"
                     >
+
                         ●
+
                     </span>
 
                 {/if}
 
 
                 <button
+                    type="button"
                     class="close"
                     title="Close"
+                    aria-label={
+                        `Close ${file.name}`
+                    }
                     onclick={(event) =>
                         handleClose(
                             event,
@@ -799,10 +1006,77 @@
         bind:this={editorContainer}
     ></div>
 
+
 </div>
 
 
+<!--
+|--------------------------------------------------------------------------
+| Confirmation Modal
+|--------------------------------------------------------------------------
+-->
+
+<ConfirmModal
+
+    visible={
+        showCloseModal
+    }
+
+    title="Save Changes"
+
+    message={
+        "This file has unsaved changes. " +
+        "Do you want to save them before closing?"
+    }
+
+    fileName={
+
+        filePendingClose
+
+            ? (
+                $openedFiles.find(
+                    (file) =>
+                        normalizePath(
+                            file.path
+                        ) ===
+                        normalizePath(
+                            filePendingClose!
+                        )
+                )?.name ?? ""
+            )
+
+            : ""
+
+    }
+
+    confirmText="Save"
+
+    secondaryText="Don't Save"
+
+    cancelText="Cancel"
+
+    onConfirm={
+        confirmCloseSave
+    }
+
+    onSecondary={
+        confirmCloseWithoutSave
+    }
+
+    onCancel={
+        cancelClose
+    }
+
+/>
+
+
 <style>
+
+    /*
+    |--------------------------------------------------------------------------
+    | Editor
+    |--------------------------------------------------------------------------
+    */
 
     .editor {
 
@@ -814,7 +1088,8 @@
 
         flex-direction: column;
 
-        background: #1e1e1e;
+        background:
+            #1e1e1e;
 
     }
 
@@ -835,10 +1110,11 @@
 
         align-items: stretch;
 
-        background: #181818;
+        background:
+            #181818;
 
         border-bottom:
-            1px solid #333;
+            1px solid #333333;
 
         overflow-x: auto;
 
@@ -871,34 +1147,42 @@
         padding:
             0 8px;
 
-        background: #181818;
+        background:
+            #181818;
 
         border-right:
             1px solid #2d2d2d;
 
-        color: #858585;
+        color:
+            #858585;
 
-        cursor: pointer;
+        cursor:
+            pointer;
 
-        user-select: none;
+        user-select:
+            none;
 
     }
 
 
     .tab:hover {
 
-        background: #202020;
+        background:
+            #202020;
 
-        color: #cccccc;
+        color:
+            #cccccc;
 
     }
 
 
     .tab.active {
 
-        background: #1e1e1e;
+        background:
+            #1e1e1e;
 
-        color: #ffffff;
+        color:
+            #ffffff;
 
         border-top:
             1px solid #007acc;
@@ -906,26 +1190,45 @@
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | File Icon
+    |--------------------------------------------------------------------------
+    */
+
     .file-icon {
 
-        font-size: 12px;
+        font-size:
+            12px;
 
-        flex-shrink: 0;
+        flex-shrink:
+            0;
 
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | File Name
+    |--------------------------------------------------------------------------
+    */
+
     .file-name {
 
-        flex: 1;
+        flex:
+            1;
 
-        min-width: 0;
+        min-width:
+            0;
 
-        overflow: hidden;
+        overflow:
+            hidden;
 
-        text-overflow: ellipsis;
+        text-overflow:
+            ellipsis;
 
-        white-space: nowrap;
+        white-space:
+            nowrap;
 
     }
 
@@ -938,57 +1241,75 @@
 
     .dirty {
 
-        color: #ffffff;
+        color:
+            #ffffff;
 
-        font-size: 10px;
+        font-size:
+            10px;
 
-        line-height: 1;
+        line-height:
+            1;
 
-        flex-shrink: 0;
+        flex-shrink:
+            0;
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Close
+    | Close Button
     |--------------------------------------------------------------------------
     */
 
     .close {
 
-        width: 22px;
+        width:
+            22px;
 
-        height: 22px;
+        height:
+            22px;
 
-        display: flex;
+        display:
+            flex;
 
-        align-items: center;
+        align-items:
+            center;
 
-        justify-content: center;
+        justify-content:
+            center;
 
-        border: none;
+        border:
+            none;
 
-        background: transparent;
+        background:
+            transparent;
 
-        color: #858585;
+        color:
+            #858585;
 
-        font-size: 16px;
+        font-size:
+            16px;
 
-        cursor: pointer;
+        cursor:
+            pointer;
 
-        padding: 0;
+        padding:
+            0;
 
-        flex-shrink: 0;
+        flex-shrink:
+            0;
 
     }
 
 
     .close:hover {
 
-        background: #333;
+        background:
+            #333333;
 
-        color: #ffffff;
+        color:
+            #ffffff;
 
     }
 
@@ -1001,11 +1322,14 @@
 
     .monaco-container {
 
-        flex: 1;
+        flex:
+            1;
 
-        min-height: 0;
+        min-height:
+            0;
 
-        width: 100%;
+        width:
+            100%;
 
     }
 

@@ -4,6 +4,7 @@ import {
     get
 } from "svelte/store";
 
+
 /*
 |--------------------------------------------------------------------------
 | Open File
@@ -40,7 +41,9 @@ export const openedFiles =
 */
 
 export const activeFile =
-    writable<OpenFile | null>(null);
+    writable<OpenFile | null>(
+        null
+    );
 
 
 /*
@@ -52,17 +55,14 @@ export const activeFile =
 export const activePath =
     derived(
         activeFile,
-        ($activeFile) => {
-
-            return $activeFile?.path ?? null;
-
-        }
+        ($activeFile) =>
+            $activeFile?.path ?? null
     );
 
 
 /*
 |--------------------------------------------------------------------------
-| Normalize Windows Path
+| Normalize Path
 |--------------------------------------------------------------------------
 */
 
@@ -117,10 +117,14 @@ export function openFile(
 
             return [
                 ...files,
+
                 {
                     ...file,
+
                     isDirty: false
+
                 }
+
             ];
 
         }
@@ -217,7 +221,7 @@ export function updateFileContent(
 
             const updatedFiles =
                 files.map(
-                    (file): OpenFile => {
+                    (file) => {
 
                         if (
                             normalizePath(
@@ -253,22 +257,6 @@ export function updateFileContent(
             );
 
 
-            console.log(
-                "[STORE] Dirty state:",
-                updatedFiles.map(
-                    (file) => ({
-
-                        name:
-                            file.name,
-
-                        isDirty:
-                            file.isDirty
-
-                    })
-                )
-            );
-
-
             return updatedFiles;
 
         }
@@ -284,9 +272,7 @@ export function updateFileContent(
     activeFile.update(
         (file) => {
 
-            if (
-                !file
-            ) {
+            if (!file) {
 
                 return file;
 
@@ -339,12 +325,6 @@ export async function saveFile(
     );
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Find File
-    |--------------------------------------------------------------------------
-    */
-
     const files =
         get(openedFiles);
 
@@ -368,7 +348,6 @@ export async function saveFile(
             filePath
         );
 
-
         return false;
 
     }
@@ -378,29 +357,27 @@ export async function saveFile(
 
         /*
         |--------------------------------------------------------------------------
-        | Write Through Electron IPC
+        | Write To Disk
         |--------------------------------------------------------------------------
         */
 
-        await window.craftale.filesystem.writeFile(
-
-            fileToSave.path,
-
-            fileToSave.content
-
-        );
+        await window.craftale
+            .filesystem
+            .writeFile(
+                fileToSave.path,
+                fileToSave.content
+            );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Mark File Clean
+        | Mark Clean
         |--------------------------------------------------------------------------
         */
 
         openedFiles.update(
-            (files) => {
-
-                return files.map(
+            (files) =>
+                files.map(
                     (file) => {
 
                         if (
@@ -426,24 +403,20 @@ export async function saveFile(
                         return file;
 
                     }
-                );
-
-            }
+                )
         );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Update Active File
+        | Active File
         |--------------------------------------------------------------------------
         */
 
         activeFile.update(
             (file) => {
 
-                if (
-                    !file
-                ) {
+                if (!file) {
 
                     return file;
 
@@ -551,6 +524,12 @@ export function closeFile(
     );
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Active File
+    |--------------------------------------------------------------------------
+    */
+
     const currentActive =
         get(activeFile);
 
@@ -576,9 +555,9 @@ export function closeFile(
         } else {
 
             const newIndex =
-                Math.max(
-                    0,
-                    index - 1
+                Math.min(
+                    index,
+                    newFiles.length - 1
                 );
 
 
@@ -589,5 +568,24 @@ export function closeFile(
         }
 
     }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Dirty Files
+|--------------------------------------------------------------------------
+*/
+
+export function getDirtyFiles():
+    OpenFile[] {
+
+    return get(
+        openedFiles
+    ).filter(
+        (file) =>
+            file.isDirty
+    );
 
 }
