@@ -1,17 +1,23 @@
 <script lang="ts">
 
-    import { onMount } from "svelte";
+    import {
+        onMount,
+        onDestroy
+    } from "svelte";
 
-    import * as monaco from "monaco-editor";
 
     import {
-        activeFile,
         openedFiles,
-        activePath,
+        activeFile,
+        updateFileContent,
+        saveFile,
         activateFile,
-        closeFile,
-        updateFileContent
+        closeFile
     } from "../stores/workspace";
+
+
+    import * as monaco
+        from "monaco-editor";
 
 
     /*
@@ -24,18 +30,20 @@
         HTMLDivElement;
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Monaco Editor
+    |--------------------------------------------------------------------------
+    */
+
     let editor:
-        monaco.editor.IStandaloneCodeEditor | null =
-        null;
+        monaco.editor.IStandaloneCodeEditor;
 
 
     /*
     |--------------------------------------------------------------------------
-    | Monaco Models
+    | Models
     |--------------------------------------------------------------------------
-    |
-    | One model per file.
-    |
     */
 
     const models =
@@ -47,16 +55,35 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Prevent Store Update While Switching Files
+    | Prevent Content Change During
+    | Model Switching
     |--------------------------------------------------------------------------
     */
 
-    let switchingModel = false;
+    let switchingModel =
+        false;
 
 
     /*
     |--------------------------------------------------------------------------
-    | Language Detection
+    | Normalize Path
+    |--------------------------------------------------------------------------
+    */
+
+    function normalizePath(
+        filePath: string
+    ): string {
+
+        return filePath
+            .replace(/\\/g, "/")
+            .toLowerCase();
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Monaco Language
     |--------------------------------------------------------------------------
     */
 
@@ -74,24 +101,25 @@
         switch (extension) {
 
             case "ts":
+                return "typescript";
+
             case "tsx":
                 return "typescript";
 
             case "js":
+                return "javascript";
+
             case "jsx":
                 return "javascript";
 
             case "json":
                 return "json";
 
-            case "html":
-                return "html";
-
             case "css":
                 return "css";
 
-            case "scss":
-                return "scss";
+            case "html":
+                return "html";
 
             case "svelte":
                 return "html";
@@ -102,36 +130,9 @@
             case "xml":
                 return "xml";
 
-            case "yaml":
             case "yml":
+            case "yaml":
                 return "yaml";
-
-            case "sql":
-                return "sql";
-
-            case "java":
-                return "java";
-
-            case "py":
-                return "python";
-
-            case "c":
-                return "c";
-
-            case "cpp":
-                return "cpp";
-
-            case "cs":
-                return "csharp";
-
-            case "sh":
-                return "shell";
-
-            case "bat":
-                return "bat";
-
-            case "ps1":
-                return "powershell";
 
             default:
                 return "plaintext";
@@ -143,11 +144,11 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Get Or Create Model
+    | Create Model
     |--------------------------------------------------------------------------
     */
 
-    function getModel(
+    function getOrCreateModel(
         file: {
             name: string;
             path: string;
@@ -155,19 +156,29 @@
         }
     ) {
 
+        const key =
+            normalizePath(
+                file.path
+            );
+
+
         /*
         |--------------------------------------------------------------------------
         | Existing Model
         |--------------------------------------------------------------------------
         */
 
-        const existing =
-            models.get(file.path);
+        const existingModel =
+            models.get(
+                key
+            );
 
 
-        if (existing) {
+        if (
+            existingModel
+        ) {
 
-            return existing;
+            return existingModel;
 
         }
 
@@ -205,9 +216,11 @@
 
 
         models.set(
-            file.path,
+            key,
             model
         );
+
+
         return model;
 
     }
@@ -215,7 +228,7 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Open File In Monaco
+    | Show Active File
     |--------------------------------------------------------------------------
     */
 
@@ -224,63 +237,163 @@
             name: string;
             path: string;
             content: string;
-        } | null
+        }
     ) {
 
-        if (!editor) {
+        if (
+            !editor
+        ) {
 
             return;
 
         }
 
 
-        if (!file) {
+        console.log(
+            "[EDITOR] Showing:",
+            file.path
+        );
 
-            editor.setModel(null);
-
-            return;
-
-        }
-        switchingModel = true;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Get Model
-        |--------------------------------------------------------------------------
-        */
 
         const model =
-            getModel(file);
+            getOrCreateModel(
+                file
+            );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Attach Model
-        |--------------------------------------------------------------------------
-        */
+        switchingModel =
+            true;
+
 
         editor.setModel(
             model
         );
 
 
-        switchingModel = false;
+        switchingModel =
+            false;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Save Current File
+    |--------------------------------------------------------------------------
+    */
+
+    async function saveCurrentFile() {
+
+        if (
+            !editor
+        ) {
+
+            return;
+
+        }
+
+
+        const model =
+            editor.getModel();
+
+
+        if (
+            !model
+        ) {
+
+            return;
+
+        }
+
+
+        const path =
+            model.uri.fsPath;
+
+
+        const content =
+            model.getValue();
+
+
+        console.log(
+            "[EDITOR] Saving:",
+            path
+        );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Layout
+        | Make Sure Store Has Latest Content
         |--------------------------------------------------------------------------
         */
 
-        requestAnimationFrame(
-            () => {
-
-                editor?.layout();
-
-            }
+        updateFileContent(
+            path,
+            content
         );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Save
+        |--------------------------------------------------------------------------
+        */
+
+        const success =
+            await saveFile(
+                path
+            );
+
+
+        if (
+            success
+        ) {
+
+            console.log(
+                "[EDITOR] Saved:",
+                path
+            );
+
+        } else {
+
+            console.error(
+                "[EDITOR] Save failed:",
+                path
+            );
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Keyboard Handler
+    |--------------------------------------------------------------------------
+    */
+
+    function handleKeyDown(
+        event: KeyboardEvent
+    ) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Ctrl + S
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            (
+                event.ctrlKey ||
+                event.metaKey
+            ) &&
+            event.key.toLowerCase() === "s"
+        ) {
+
+            event.preventDefault();
+
+            void saveCurrentFile();
+
+        }
 
     }
 
@@ -293,207 +406,258 @@
 
     function handleClose(
         event: MouseEvent,
-        path: string
+        filePath: string
     ) {
 
         event.stopPropagation();
 
 
-        closeFile(path);
+        console.log(
+            "[EDITOR] Closing:",
+            filePath
+        );
+
+
+        closeFile(
+            filePath
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Dispose Model
+        |--------------------------------------------------------------------------
+        */
+
+        const key =
+            normalizePath(
+                filePath
+            );
+
+
+        const model =
+            models.get(
+                key
+            );
+
+
+        if (
+            model
+        ) {
+
+            model.dispose();
+
+            models.delete(
+                key
+            );
+
+        }
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Mount
+    | Monaco Change Listener
     |--------------------------------------------------------------------------
     */
 
-    onMount(() => {
-        /*
-        |--------------------------------------------------------------------------
-        | Create Editor
-        |--------------------------------------------------------------------------
-        */
-
-        editor =
-            monaco.editor.create(
-                editorContainer,
-                {
-
-                    theme: "vs-dark",
-
-                    automaticLayout: true,
-
-                    fontSize: 14,
-
-                    fontFamily:
-                        "Consolas, 'Courier New', monospace",
-
-                    lineNumbers: "on",
-
-                    minimap: {
-
-                        enabled: true
-
-                    },
-
-                    wordWrap: "off",
-
-                    tabSize: 4,
-
-                    insertSpaces: true,
-
-                    scrollBeyondLastLine: false,
-
-                    smoothScrolling: true,
-
-                    cursorBlinking: "smooth",
-
-                    padding: {
-
-                        top: 10,
-
-                        bottom: 10
-
-                    }
-
-                }
-            );
+    let contentDisposable:
+        monaco.IDisposable;
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Content Changed
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Active File Subscription
+    |--------------------------------------------------------------------------
+    */
 
-       const contentDisposable =
-    editor.onDidChangeModelContent(
+    let activeFileUnsubscribe:
+        () => void;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Component Mount
+    |--------------------------------------------------------------------------
+    */
+
+    onMount(
         () => {
 
             /*
             |--------------------------------------------------------------------------
-            | Ignore changes while switching files
+            | Create Monaco
             |--------------------------------------------------------------------------
             */
 
-            if (switchingModel) {
+            editor =
+                monaco.editor.create(
+                    editorContainer,
+                    {
 
-                return;
+                        theme:
+                            "vs-dark",
 
-            }
+                        automaticLayout:
+                            true,
+
+                        minimap: {
+
+                            enabled: true
+
+                        },
+
+                        fontSize:
+                            14,
+
+                        fontFamily:
+                            "Consolas, 'Courier New', monospace",
+
+                        lineNumbers:
+                            "on",
+
+                        wordWrap:
+                            "off",
+
+                        scrollBeyondLastLine:
+                            false,
+
+                        tabSize:
+                            4,
+
+                        insertSpaces:
+                            true
+
+                    }
+                );
 
 
             /*
             |--------------------------------------------------------------------------
-            | Get Current Monaco Model
+            | Content Changed
             |--------------------------------------------------------------------------
             */
 
-            const model =
-                editor?.getModel();
+            contentDisposable =
+                editor.onDidChangeModelContent(
+                    () => {
+
+                        if (
+                            switchingModel
+                        ) {
+
+                            return;
+
+                        }
 
 
-            if (!model) {
+                        const model =
+                            editor.getModel();
 
-                return;
 
-            }
+                        if (
+                            !model
+                        ) {
+
+                            return;
+
+                        }
+
+
+                        const path =
+                            model.uri.fsPath;
+
+
+                        const content =
+                            model.getValue();
+
+
+                        console.log(
+                            "[MONACO] Content changed:",
+                            path
+                        );
+
+
+                        console.log(
+                            "[MONACO] Calling updateFileContent..."
+                        );
+
+
+                        updateFileContent(
+                            path,
+                            content
+                        );
+
+                    }
+                );
 
 
             /*
             |--------------------------------------------------------------------------
-            | Get File Path
+            | Active File Subscription
             |--------------------------------------------------------------------------
             */
 
-            const path =
-                model.uri.fsPath;
+            activeFileUnsubscribe =
+                activeFile.subscribe(
+                    (file) => {
+
+                        if (
+                            !file
+                        ) {
+
+                            editor.setModel(
+                                null
+                            );
+
+                            return;
+
+                        }
+
+
+                        showFile(
+                            file
+                        );
+
+                    }
+                );
 
 
             /*
             |--------------------------------------------------------------------------
-            | Get Current Editor Content
+            | Ctrl + S
             |--------------------------------------------------------------------------
             */
 
-            const content =
-                model.getValue();
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Debug
-            |--------------------------------------------------------------------------
-            */
-
-            /*
-            |--------------------------------------------------------------------------
-            | Update Workspace Store
-            |--------------------------------------------------------------------------
-            */
-
-            updateFileContent(
-                path,
-                content
+            window.addEventListener(
+                "keydown",
+                handleKeyDown
             );
 
         }
     );
-        /*
-        |--------------------------------------------------------------------------
-        | Active File
-        |--------------------------------------------------------------------------
-        */
-
-        const activeUnsubscribe =
-            activeFile.subscribe(
-                file => {
-
-                    showFile(file);
-
-                }
-            );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Resize
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Destroy
+    |--------------------------------------------------------------------------
+    */
 
-        const resize =
-            () => {
-
-                editor?.layout();
-
-            };
-
-
-        window.addEventListener(
-            "resize",
-            resize
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Cleanup
-        |--------------------------------------------------------------------------
-        */
-
-        return () => {
-
-            contentDisposable.dispose();
-
-            activeUnsubscribe();
+    onDestroy(
+        () => {
 
             window.removeEventListener(
-                "resize",
-                resize
+                "keydown",
+                handleKeyDown
             );
+
+
+            contentDisposable?.dispose();
+
+
+            activeFileUnsubscribe?.();
 
 
             /*
@@ -502,31 +666,40 @@
             |--------------------------------------------------------------------------
             */
 
-            models.forEach(
-                model => {
+            for (
+                const model
+                of models.values()
+            ) {
 
-                    model.dispose();
+                model.dispose();
 
-                }
-            );
+            }
 
 
             models.clear();
 
 
+            /*
+            |--------------------------------------------------------------------------
+            | Dispose Editor
+            |--------------------------------------------------------------------------
+            */
+
             editor?.dispose();
 
-            editor = null;
-
-        };
-
-    });
+        }
+    );
 
 </script>
 
 
-<div class="editor">
+<!--
+|--------------------------------------------------------------------------
+| Editor
+|--------------------------------------------------------------------------
+-->
 
+<div class="editor">
 
     <!--
     |--------------------------------------------------------------------------
@@ -543,7 +716,8 @@
             <div
                 class="tab"
                 class:active={
-                    file.path === $activePath
+                    file.path ===
+                    $activeFile?.path
                 }
                 role="tab"
                 tabindex="0"
@@ -576,15 +750,16 @@
 
 
                 <span class="file-name">
-
                     {file.name}
-
                 </span>
 
 
                 {#if file.isDirty}
 
-                    <span class="dirty">
+                    <span
+                        class="dirty"
+                        title="Unsaved changes"
+                    >
                         ●
                     </span>
 
@@ -615,41 +790,14 @@
 
     <!--
     |--------------------------------------------------------------------------
-    | Editor
+    | Monaco
     |--------------------------------------------------------------------------
     -->
 
-    <div class="editor-body">
-
-        <div
-            class="monaco-container"
-            bind:this={editorContainer}
-        ></div>
-
-
-        {#if !$activeFile}
-
-            <div class="welcome">
-
-                <div class="logo">
-                    C
-                </div>
-
-
-                <h1>
-                    Craftale
-                </h1>
-
-
-                <p>
-                    Open a file from the Explorer
-                </p>
-
-            </div>
-
-        {/if}
-
-    </div>
+    <div
+        class="monaco-container"
+        bind:this={editorContainer}
+    ></div>
 
 </div>
 
@@ -666,8 +814,6 @@
 
         flex-direction: column;
 
-        overflow: hidden;
-
         background: #1e1e1e;
 
     }
@@ -681,31 +827,40 @@
 
     .tabs {
 
-        height: 35px;
+        height: 36px;
 
-        min-height: 35px;
+        min-height: 36px;
 
         display: flex;
+
+        align-items: stretch;
+
+        background: #181818;
+
+        border-bottom:
+            1px solid #333;
 
         overflow-x: auto;
 
         overflow-y: hidden;
 
-        background: #252526;
+    }
 
-        border-bottom:
-            1px solid #333;
+
+    .tabs::-webkit-scrollbar {
+
+        height: 4px;
 
     }
 
 
     .tab {
 
-        height: 35px;
+        height: 36px;
 
-        min-width: 140px;
+        min-width: 130px;
 
-        max-width: 240px;
+        max-width: 220px;
 
         display: flex;
 
@@ -714,16 +869,14 @@
         gap: 6px;
 
         padding:
-            0 8px 0 12px;
+            0 8px;
 
-        background: #2d2d2d;
+        background: #181818;
 
         border-right:
-            1px solid #1e1e1e;
+            1px solid #2d2d2d;
 
-        color: #969696;
-
-        font-size: 13px;
+        color: #858585;
 
         cursor: pointer;
 
@@ -734,7 +887,9 @@
 
     .tab:hover {
 
-        background: #323232;
+        background: #202020;
+
+        color: #cccccc;
 
     }
 
@@ -753,6 +908,8 @@
 
     .file-icon {
 
+        font-size: 12px;
+
         flex-shrink: 0;
 
     }
@@ -766,9 +923,9 @@
 
         overflow: hidden;
 
-        white-space: nowrap;
-
         text-overflow: ellipsis;
+
+        white-space: nowrap;
 
     }
 
@@ -781,9 +938,13 @@
 
     .dirty {
 
-        color: #ffffffff;
+        color: #ffffff;
 
         font-size: 10px;
+
+        line-height: 1;
+
+        flex-shrink: 0;
 
     }
 
@@ -810,134 +971,41 @@
 
         background: transparent;
 
-        color: #999;
+        color: #858585;
 
-        font-size: 18px;
+        font-size: 16px;
 
         cursor: pointer;
+
+        padding: 0;
+
+        flex-shrink: 0;
 
     }
 
 
     .close:hover {
 
-        background: #444;
+        background: #333;
 
-        color: white;
+        color: #ffffff;
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Editor Body
+    | Monaco
     |--------------------------------------------------------------------------
     */
-
-    .editor-body {
-
-        position: relative;
-
-        flex: 1;
-
-        min-width: 0;
-
-        min-height: 0;
-
-        overflow: hidden;
-
-    }
-
 
     .monaco-container {
 
-        position: absolute;
+        flex: 1;
 
-        inset: 0;
+        min-height: 0;
 
         width: 100%;
-
-        height: 100%;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Welcome
-    |--------------------------------------------------------------------------
-    */
-
-    .welcome {
-
-        position: absolute;
-
-        inset: 0;
-
-        z-index: 10;
-
-        display: flex;
-
-        flex-direction: column;
-
-        align-items: center;
-
-        justify-content: center;
-
-        background: #1e1e1e;
-
-        color: #858585;
-
-        pointer-events: none;
-
-    }
-
-
-    .logo {
-
-        width: 70px;
-
-        height: 70px;
-
-        display: flex;
-
-        align-items: center;
-
-        justify-content: center;
-
-        margin-bottom: 20px;
-
-        border:
-            2px solid #858585;
-
-        border-radius: 12px;
-
-        color: #cccccc;
-
-        font-size: 40px;
-
-    }
-
-
-    .welcome h1 {
-
-        margin:
-            0 0 8px;
-
-        color: #cccccc;
-
-        font-size: 28px;
-
-        font-weight: 400;
-
-    }
-
-
-    .welcome p {
-
-        margin: 0;
-
-        font-size: 13px;
 
     }
 

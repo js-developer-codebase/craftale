@@ -1,5 +1,4 @@
 <script lang="ts">
-
     import FileExplorer
         from "./components/FileExplorer.svelte";
 

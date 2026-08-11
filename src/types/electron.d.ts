@@ -1,6 +1,4 @@
 export { };
-
-
 declare global {
 
     interface Window {
@@ -9,7 +7,7 @@ declare global {
 
             /*
             |--------------------------------------------------------------------------
-            | Application
+            | APPLICATION
             |--------------------------------------------------------------------------
             */
 
@@ -24,12 +22,11 @@ declare global {
 
             /*
             |--------------------------------------------------------------------------
-            | Filesystem
+            | FILESYSTEM
             |--------------------------------------------------------------------------
             */
 
             filesystem: {
-
 
                 /*
                 |--------------------------------------------------------------------------
@@ -50,17 +47,17 @@ declare global {
 
                 readDirectory(
                     directoryPath: string
-                ): Promise<
-                    Array<{
-                        name: string;
+                ): Promise<{
 
-                        path: string;
+                    name: string;
 
-                        type:
-                        | "file"
-                        | "directory";
-                    }>
-                >;
+                    path: string;
+
+                    type:
+                    | "file"
+                    | "directory";
+
+                }[]>;
 
 
                 /*
@@ -72,6 +69,18 @@ declare global {
                 readFile(
                     filePath: string
                 ): Promise<string>;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Write File
+                |--------------------------------------------------------------------------
+                */
+
+                writeFile(
+                    filePath: string,
+                    content: string
+                ): Promise<boolean>;
 
             };
 

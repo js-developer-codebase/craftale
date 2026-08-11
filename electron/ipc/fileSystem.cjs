@@ -1,5 +1,66 @@
+const {
+    ipcMain,
+    dialog
+} = require("electron");
+
 const fs = require("fs/promises");
+
 const path = require("path");
+
+
+/*
+|--------------------------------------------------------------------------
+| Select Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:select-folder",
+    async () => {
+
+        console.log(
+            "[IPC] select-folder"
+        );
+
+
+        const result =
+            await dialog.showOpenDialog({
+
+                properties: [
+                    "openDirectory"
+                ]
+
+            });
+
+
+        if (
+            result.canceled ||
+            result.filePaths.length === 0
+        ) {
+
+            console.log(
+                "[IPC] Folder selection cancelled"
+            );
+
+            return null;
+
+        }
+
+
+        const selectedPath =
+            result.filePaths[0];
+
+
+        console.log(
+            "[IPC] Selected folder:",
+            selectedPath
+        );
+
+
+        return selectedPath;
+
+    }
+);
 
 
 /*
@@ -8,80 +69,118 @@ const path = require("path");
 |--------------------------------------------------------------------------
 */
 
-async function readDirectory(directoryPath) {
-
-    console.log(
-        "[FS] Reading directory:",
+ipcMain.handle(
+    "filesystem:read-directory",
+    async (
+        event,
         directoryPath
-    );
-
-    try {
-
-        const entries = await fs.readdir(
-            directoryPath,
-            {
-                withFileTypes: true
-            }
-        );
-
-
-        const result = entries
-            .map((entry) => {
-
-                return {
-                    name: entry.name,
-
-                    path: path.resolve(
-                        directoryPath,
-                        entry.name
-                    ),
-
-                    type: entry.isDirectory()
-                        ? "directory"
-                        : "file"
-                };
-
-            })
-            .sort((a, b) => {
-
-                // Directories first
-                if (a.type !== b.type) {
-
-                    return a.type === "directory"
-                        ? -1
-                        : 1;
-
-                }
-
-                // Alphabetical
-                return a.name.localeCompare(
-                    b.name
-                );
-
-            });
-
+    ) => {
 
         console.log(
-            "[FS] Found",
-            result.length,
-            "items"
-        );
-
-
-        return result;
-
-    } catch (error) {
-
-        console.error(
-            "[FS] Failed to read directory:",
+            "[IPC] read-directory:",
             directoryPath
         );
 
-        throw error;
+
+        try {
+
+            console.log(
+                "[FS] Reading:",
+                directoryPath
+            );
+
+
+            const entries =
+                await fs.readdir(
+                    directoryPath,
+                    {
+                        withFileTypes: true
+                    }
+                );
+
+
+            const items =
+                entries.map(
+                    (entry) => {
+
+                        return {
+
+                            name:
+                                entry.name,
+
+                            path:
+                                path.join(
+                                    directoryPath,
+                                    entry.name
+                                ),
+
+                            type:
+                                entry.isDirectory()
+                                    ? "directory"
+                                    : "file"
+
+                        };
+
+                    }
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Sort
+            |--------------------------------------------------------------------------
+            |
+            | Directories first, files second.
+            |
+            */
+
+            items.sort(
+                (a, b) => {
+
+                    if (
+                        a.type !== b.type
+                    ) {
+
+                        return (
+                            a.type === "directory"
+                                ? -1
+                                : 1
+                        );
+
+                    }
+
+
+                    return a.name.localeCompare(
+                        b.name
+                    );
+
+                }
+            );
+
+
+            console.log(
+                "[FS] Found",
+                items.length,
+                "items"
+            );
+
+
+            return items;
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Failed to read directory:",
+                error
+            );
+
+
+            throw error;
+
+        }
 
     }
-
-}
+);
 
 
 /*
@@ -90,55 +189,100 @@ async function readDirectory(directoryPath) {
 |--------------------------------------------------------------------------
 */
 
-async function readFile(filePath) {
-
-    console.log(
-        "[FS] Reading file:",
+ipcMain.handle(
+    "filesystem:read-file",
+    async (
+        event,
         filePath
-    );
+    ) => {
+
+        console.log(
+            "[IPC] read-file:",
+            filePath
+        );
 
 
-    try {
+        try {
 
-        const content =
-            await fs.readFile(
-                filePath,
-                "utf-8"
+            const content =
+                await fs.readFile(
+                    filePath,
+                    "utf-8"
+                );
+
+
+            console.log(
+                "[FS] File read:",
+                filePath
             );
 
 
-        console.log(
-            "[FS] File read successfully:",
-            filePath
-        );
+            return content;
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Failed to read file:",
+                error
+            );
 
 
-        return content;
+            throw error;
 
-    } catch (error) {
-
-        console.error(
-            "[FS] Failed to read file:",
-            filePath
-        );
-
-        throw error;
+        }
 
     }
-
-}
+);
 
 
 /*
 |--------------------------------------------------------------------------
-| Exports
+| Write File
 |--------------------------------------------------------------------------
 */
 
-module.exports = {
+ipcMain.handle(
+    "filesystem:write-file",
+    async (
+        event,
+        filePath,
+        content
+    ) => {
 
-    readDirectory,
+        console.log(
+            "[IPC] write-file:",
+            filePath
+        );
 
-    readFile
 
-};
+        try {
+
+            await fs.writeFile(
+                filePath,
+                content,
+                "utf-8"
+            );
+
+
+            console.log(
+                "[FS] File saved:",
+                filePath
+            );
+
+
+            return true;
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Failed to save file:",
+                error
+            );
+
+
+            throw error;
+
+        }
+
+    }
+);
