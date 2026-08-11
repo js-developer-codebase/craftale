@@ -69,22 +69,12 @@
 
         try {
 
-            console.log(
-                "[RENDERER] Reading directory:",
-                item.path
-            );
-
-
+          
             children =
                 await window.craftale.filesystem.readDirectory(
                     item.path
                 );
 
-
-            console.log(
-                "[RENDERER] Directory contents:",
-                children
-            );
 
         } catch (error) {
 
@@ -110,11 +100,6 @@
 
     async function handleFileClick() {
 
-        console.log(
-            "[RENDERER] FILE CLICKED:",
-            item.path
-        );
-
 
         try {
 
@@ -122,12 +107,6 @@
                 await window.craftale.filesystem.readFile(
                     item.path
                 );
-
-
-            console.log(
-                "[RENDERER] FILE CONTENT:",
-                content
-            );
 
 
             openFile({
@@ -141,9 +120,7 @@
             });
 
 
-            console.log(
-                "[RENDERER] openFile() completed"
-            );
+       
 
         } catch (error) {
 
@@ -165,11 +142,7 @@
 
     function handleClick() {
 
-        console.log(
-            "[RENDERER] CLICK:",
-            item.name,
-            item.type
-        );
+
 
 
         if (

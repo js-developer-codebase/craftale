@@ -63,3 +63,10 @@ body {
 button {
   font-family: inherit;
 }
+
+.dirty {
+  color: #ffffff;
+  font-size: 10px;
+  margin-left: 4px;
+  line-height: 1;
+}

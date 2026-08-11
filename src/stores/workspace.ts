@@ -11,6 +11,7 @@ export type OpenFile = {
     name: string;
     path: string;
     content: string;
+    isDirty: boolean;
 };
 
 
@@ -50,58 +51,78 @@ export const activePath =
 |--------------------------------------------------------------------------
 */
 
-export function openFile(file: OpenFile) {
+export function openFile(
+    file: {
+        name: string;
+        path: string;
+        content: string;
+    }
+) {
 
-    console.log(
-        "[STORE] Opening file:",
-        file.path
-    );
+    const newFile: OpenFile = {
+
+        name: file.name,
+
+        path: file.path,
+
+        content: file.content,
+
+        isDirty: false
+
+    };
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Add to tabs if not already open
-    |--------------------------------------------------------------------------
-    */
+    openedFiles.update(
+        (files: OpenFile[]) => {
 
-    openedFiles.update(files => {
+            /*
+            |--------------------------------------------------------------------------
+            | Check whether already open
+            |--------------------------------------------------------------------------
+            */
 
-        const exists =
-            files.some(
-                existing =>
-                    existing.path === file.path
+            const existing =
+                files.find(
+                    (item: OpenFile) =>
+                        item.path === file.path
+                );
+
+
+            if (existing) {
+
+                activeFile.set(existing);
+
+                activePath.set(
+                    existing.path
+                );
+
+                return files;
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Add new file
+            |--------------------------------------------------------------------------
+            */
+
+            const updatedFiles: OpenFile[] = [
+                ...files,
+                newFile
+            ];
+
+
+            activeFile.set(newFile);
+
+            activePath.set(
+                newFile.path
             );
 
 
-        if (exists) {
-
-            return files;
+            return updatedFiles;
 
         }
-
-
-        return [
-            ...files,
-            file
-        ];
-
-    });
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Set active file
-    |--------------------------------------------------------------------------
-    */
-
-    activeFile.set(file);
-
-    activePath.set(file.path);
-
-
-    console.log(
-        "[STORE] Active file:",
-        file.name
     );
 
 }
@@ -109,7 +130,7 @@ export function openFile(file: OpenFile) {
 
 /*
 |--------------------------------------------------------------------------
-| Activate Existing Tab
+| Activate File
 |--------------------------------------------------------------------------
 */
 
@@ -117,119 +138,35 @@ export function activateFile(
     filePath: string
 ) {
 
-    openedFiles.subscribe(files => {
+    openedFiles.update(
+        (files: OpenFile[]) => {
 
-        const file =
-            files.find(
-                item =>
-                    item.path === filePath
-            );
+            const file:
+                OpenFile | undefined =
+                files.find(
+                    (item: OpenFile) =>
+                        item.path === filePath
+                );
 
 
-        if (file) {
+            if (!file) {
+
+                return files;
+
+            }
+
 
             activeFile.set(file);
 
-            activePath.set(file.path);
-
-        }
-
-    })();
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Close File
-|--------------------------------------------------------------------------
-*/
-
-export function closeFile(
-    filePath: string
-) {
-
-    openedFiles.update(files => {
-
-        const index =
-            files.findIndex(
-                file =>
-                    file.path === filePath
+            activePath.set(
+                file.path
             );
 
-
-        if (index === -1) {
 
             return files;
 
         }
-
-
-        const remaining =
-            files.filter(
-                file =>
-                    file.path !== filePath
-            );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Check whether active file is closing
-        |--------------------------------------------------------------------------
-        */
-
-        activeFile.update(current => {
-
-            if (
-                current?.path !== filePath
-            ) {
-
-                return current;
-
-            }
-
-
-            if (
-                remaining.length === 0
-            ) {
-
-                activePath.set(null);
-
-                return null;
-
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Activate previous tab
-            |--------------------------------------------------------------------------
-            */
-
-            const newIndex =
-                Math.max(
-                    0,
-                    index - 1
-                );
-
-
-            const newFile =
-                remaining[newIndex];
-
-
-            activePath.set(
-                newFile.path
-            );
-
-
-            return newFile;
-
-        });
-
-
-        return remaining;
-
-    });
+    );
 
 }
 
@@ -244,10 +181,95 @@ export function updateFileContent(
     filePath: string,
     content: string
 ) {
+    openedFiles.update(
+        (files: OpenFile[]) => {
 
-    openedFiles.update(files =>
+            const updatedFiles = files.map(
+                (file: OpenFile): OpenFile => {
 
-        files.map(file => {
+                    if (
+                        file.path.toLowerCase() ===
+                        filePath.toLowerCase()
+                    ) {
+
+                        return {
+                            ...file,
+                            content: content,
+                            isDirty: true
+                        };
+
+                    }
+
+                    return file;
+
+                }
+            );
+
+
+
+
+            return updatedFiles;
+        }
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Mark File Saved
+|--------------------------------------------------------------------------
+*/
+
+export function markFileSaved(
+    filePath: string,
+    content: string
+) {
+
+    openedFiles.update(
+        (files: OpenFile[]) => {
+
+            return files.map(
+                (file: OpenFile): OpenFile => {
+
+                    if (
+                        file.path !== filePath
+                    ) {
+
+                        return file;
+
+                    }
+
+
+                    return {
+
+                        ...file,
+
+                        content,
+
+                        isDirty: false
+
+                    };
+
+                }
+            );
+
+        }
+    );
+
+
+    activeFile.update(
+        (
+            file: OpenFile | null
+        ): OpenFile | null => {
+
+            if (
+                file === null
+            ) {
+
+                return null;
+
+            }
+
 
             if (
                 file.path !== filePath
@@ -259,38 +281,173 @@ export function updateFileContent(
 
 
             return {
+
                 ...file,
-                content
+
+                content,
+
+                isDirty: false
+
             };
 
-        })
+        }
+    );
 
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Close File
+|--------------------------------------------------------------------------
+*/
+
+export function closeFile(filePath: string) {
+
+    let filesSnapshot: OpenFile[] = [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get current files
+    |--------------------------------------------------------------------------
+    */
+
+    openedFiles.subscribe(
+        (files: OpenFile[]) => {
+
+            filesSnapshot = files;
+
+        }
+    )();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Find file
+    |--------------------------------------------------------------------------
+    */
+
+    const index: number =
+        filesSnapshot.findIndex(
+            (file: OpenFile) =>
+                file.path === filePath
+        );
+
+
+    if (index === -1) {
+
+        return;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Remove file
+    |--------------------------------------------------------------------------
+    */
+
+    const remaining: OpenFile[] =
+        filesSnapshot.filter(
+            (file: OpenFile) =>
+                file.path !== filePath
+        );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get current active file
+    |--------------------------------------------------------------------------
+    */
+
+    let currentPath: string | null = null;
+
+    activePath.subscribe(
+        (path: string | null) => {
+
+            currentPath = path;
+
+        }
+    )();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Update opened files
+    |--------------------------------------------------------------------------
+    */
+
+    openedFiles.set(
+        remaining
     );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Also update active file
+    | If another file is active
     |--------------------------------------------------------------------------
     */
 
-    activeFile.update(file => {
+    if (
+        currentPath !== filePath
+    ) {
 
-        if (
-            !file ||
-            file.path !== filePath
-        ) {
+        return;
 
-            return file;
-
-        }
+    }
 
 
-        return {
-            ...file,
-            content
-        };
+    /*
+    |--------------------------------------------------------------------------
+    | No files remaining
+    |--------------------------------------------------------------------------
+    */
 
-    });
+    if (
+        remaining.length === 0
+    ) {
+
+        activeFile.set(null);
+
+        activePath.set(null);
+
+        return;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Select another tab
+    |--------------------------------------------------------------------------
+    */
+
+    const newIndex: number =
+        Math.min(
+            Math.max(
+                index - 1,
+                0
+            ),
+            remaining.length - 1
+        );
+
+
+    const newFile: OpenFile =
+        remaining[newIndex];
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Activate new file
+    |--------------------------------------------------------------------------
+    */
+
+    activeFile.set(
+        newFile
+    );
+
+    activePath.set(
+        newFile.path
+    );
 
 }
