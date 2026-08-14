@@ -1,8 +1,4 @@
-import {
-    writable,
-    derived,
-    get
-} from "svelte/store";
+import { writable } from "svelte/store";
 
 
 /*
@@ -19,9 +15,19 @@ export type OpenFile = {
 
     content: string;
 
-    isDirty: boolean;
+    isDirty?: boolean;
 
 };
+
+
+/*
+|--------------------------------------------------------------------------
+| Active File
+|--------------------------------------------------------------------------
+*/
+
+export const activeFile =
+    writable<OpenFile | null>(null);
 
 
 /*
@@ -36,43 +42,41 @@ export const openedFiles =
 
 /*
 |--------------------------------------------------------------------------
-| Active File
-|--------------------------------------------------------------------------
-*/
-
-export const activeFile =
-    writable<OpenFile | null>(
-        null
-    );
-
-
-/*
-|--------------------------------------------------------------------------
 | Active Path
 |--------------------------------------------------------------------------
 */
 
 export const activePath =
-    derived(
-        activeFile,
-        ($activeFile) =>
-            $activeFile?.path ?? null
-    );
+    writable<string | null>(null);
 
 
 /*
 |--------------------------------------------------------------------------
-| Normalize Path
+| Workspace Path
 |--------------------------------------------------------------------------
 */
 
-function normalizePath(
-    filePath: string
-): string {
+export const workspacePath =
+    writable<string | null>(null);
 
-    return filePath
-        .replace(/\\/g, "/")
-        .toLowerCase();
+
+/*
+|--------------------------------------------------------------------------
+| Set Workspace
+|--------------------------------------------------------------------------
+*/
+
+export function setWorkspace(
+    path: string
+) {
+
+    console.log(
+        "[WORKSPACE] Setting workspace:",
+        path
+    );
+
+
+    workspacePath.set(path);
 
 }
 
@@ -94,17 +98,12 @@ export function openFile(
 
 
     openedFiles.update(
-        (files) => {
+        files => {
 
             const exists =
                 files.some(
-                    (existingFile) =>
-                        normalizePath(
-                            existingFile.path
-                        ) ===
-                        normalizePath(
-                            file.path
-                        )
+                    item =>
+                        item.path === file.path
                 );
 
 
@@ -117,33 +116,20 @@ export function openFile(
 
             return [
                 ...files,
-
                 {
                     ...file,
-
-                    isDirty: false
-
+                    isDirty:
+                        file.isDirty ?? false
                 }
-
             ];
 
         }
     );
 
 
-    activeFile.set({
+    activeFile.set(file);
 
-        ...file,
-
-        isDirty: false
-
-    });
-
-
-    console.log(
-        "[STORE] Active file:",
-        file.path
-    );
+    activePath.set(file.path);
 
 }
 
@@ -155,45 +141,31 @@ export function openFile(
 */
 
 export function activateFile(
-    filePath: string
+    path: string
 ) {
 
-    const files =
-        get(openedFiles);
+    openedFiles.update(
+        files => {
+
+            const file =
+                files.find(
+                    item =>
+                        item.path === path
+                );
 
 
-    const file =
-        files.find(
-            (item) =>
-                normalizePath(
-                    item.path
-                ) ===
-                normalizePath(
-                    filePath
-                )
-        );
+            if (file) {
+
+                activeFile.set(file);
+
+                activePath.set(path);
+
+            }
 
 
-    if (!file) {
+            return files;
 
-        console.warn(
-            "[STORE] File not found:",
-            filePath
-        );
-
-        return;
-
-    }
-
-
-    activeFile.set(
-        file
-    );
-
-
-    console.log(
-        "[STORE] Activated:",
-        file.path
+        }
     );
 
 }
@@ -206,86 +178,54 @@ export function activateFile(
 */
 
 export function updateFileContent(
-    filePath: string,
+    path: string,
     content: string
 ) {
 
     console.log(
         "[STORE] Updating file:",
-        filePath
+        path
     );
 
 
     openedFiles.update(
-        (files) => {
+        files => {
 
-            const updatedFiles =
-                files.map(
-                    (file) => {
+            return files.map(
+                file => {
 
-                        if (
-                            normalizePath(
-                                file.path
-                            ) ===
-                            normalizePath(
-                                filePath
-                            )
-                        ) {
-
-                            return {
-
-                                ...file,
-
-                                content,
-
-                                isDirty: true
-
-                            };
-
-                        }
-
+                    if (
+                        file.path !== path
+                    ) {
 
                         return file;
 
                     }
-                );
 
 
-            console.log(
-                "[STORE] Updated files:",
-                updatedFiles
+                    return {
+
+                        ...file,
+
+                        content,
+
+                        isDirty: true
+
+                    };
+
+                }
             );
-
-
-            return updatedFiles;
 
         }
     );
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Update Active File
-    |--------------------------------------------------------------------------
-    */
-
     activeFile.update(
-        (file) => {
-
-            if (!file) {
-
-                return file;
-
-            }
-
+        file => {
 
             if (
-                normalizePath(
-                    file.path
-                ) !==
-                normalizePath(
-                    filePath
-                )
+                !file ||
+                file.path !== path
             ) {
 
                 return file;
@@ -311,163 +251,72 @@ export function updateFileContent(
 
 /*
 |--------------------------------------------------------------------------
-| Save File
+| Mark File Saved
 |--------------------------------------------------------------------------
 */
 
-export async function saveFile(
-    filePath: string
-): Promise<boolean> {
+export function markFileSaved(
+    path: string,
+    content: string
+) {
 
-    console.log(
-        "[STORE] Saving file:",
-        filePath
-    );
+    openedFiles.update(
+        files => {
 
+            return files.map(
+                file => {
 
-    const files =
-        get(openedFiles);
-
-
-    const fileToSave =
-        files.find(
-            (file) =>
-                normalizePath(
-                    file.path
-                ) ===
-                normalizePath(
-                    filePath
-                )
-        );
-
-
-    if (!fileToSave) {
-
-        console.error(
-            "[STORE] File not found:",
-            filePath
-        );
-
-        return false;
-
-    }
-
-
-    try {
-
-        /*
-        |--------------------------------------------------------------------------
-        | Write To Disk
-        |--------------------------------------------------------------------------
-        */
-
-        await window.craftale
-            .filesystem
-            .writeFile(
-                fileToSave.path,
-                fileToSave.content
-            );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Mark Clean
-        |--------------------------------------------------------------------------
-        */
-
-        openedFiles.update(
-            (files) =>
-                files.map(
-                    (file) => {
-
-                        if (
-                            normalizePath(
-                                file.path
-                            ) ===
-                            normalizePath(
-                                filePath
-                            )
-                        ) {
-
-                            return {
-
-                                ...file,
-
-                                isDirty: false
-
-                            };
-
-                        }
-
+                    if (
+                        file.path !== path
+                    ) {
 
                         return file;
 
                     }
-                )
-        );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Active File
-        |--------------------------------------------------------------------------
-        */
+                    return {
 
-        activeFile.update(
-            (file) => {
+                        ...file,
 
-                if (!file) {
+                        content,
 
-                    return file;
+                        isDirty: false
+
+                    };
 
                 }
+            );
+
+        }
+    );
 
 
-                if (
-                    normalizePath(
-                        file.path
-                    ) !==
-                    normalizePath(
-                        filePath
-                    )
-                ) {
+    activeFile.update(
+        file => {
 
-                    return file;
+            if (
+                !file ||
+                file.path !== path
+            ) {
 
-                }
-
-
-                return {
-
-                    ...file,
-
-                    isDirty: false
-
-                };
+                return file;
 
             }
-        );
 
 
-        console.log(
-            "[STORE] File saved:",
-            filePath
-        );
+            return {
 
+                ...file,
 
-        return true;
+                content,
 
-    } catch (error) {
+                isDirty: false
 
-        console.error(
-            "[STORE] Save failed:",
-            error
-        );
+            };
 
-
-        return false;
-
-    }
+        }
+    );
 
 }
 
@@ -479,113 +328,82 @@ export async function saveFile(
 */
 
 export function closeFile(
-    filePath: string
+    path: string
 ) {
 
-    const files =
-        get(openedFiles);
+    openedFiles.update(
+        files => {
 
-
-    const index =
-        files.findIndex(
-            (file) =>
-                normalizePath(
-                    file.path
-                ) ===
-                normalizePath(
-                    filePath
-                )
-        );
-
-
-    if (
-        index === -1
-    ) {
-
-        return;
-
-    }
-
-
-    const newFiles =
-        files.filter(
-            (file) =>
-                normalizePath(
-                    file.path
-                ) !==
-                normalizePath(
-                    filePath
-                )
-        );
-
-
-    openedFiles.set(
-        newFiles
-    );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Active File
-    |--------------------------------------------------------------------------
-    */
-
-    const currentActive =
-        get(activeFile);
-
-
-    if (
-        currentActive &&
-        normalizePath(
-            currentActive.path
-        ) ===
-        normalizePath(
-            filePath
-        )
-    ) {
-
-        if (
-            newFiles.length === 0
-        ) {
-
-            activeFile.set(
-                null
-            );
-
-        } else {
-
-            const newIndex =
-                Math.min(
-                    index,
-                    newFiles.length - 1
+            const index =
+                files.findIndex(
+                    file =>
+                        file.path === path
                 );
 
 
-            activeFile.set(
-                newFiles[newIndex]
+            if (index === -1) {
+
+                return files;
+
+            }
+
+
+            const newFiles =
+                files.filter(
+                    file =>
+                        file.path !== path
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Closed Active File
+            |--------------------------------------------------------------------------
+            */
+
+            activePath.update(
+                currentPath => {
+
+                    if (
+                        currentPath !== path
+                    ) {
+
+                        return currentPath;
+
+                    }
+
+
+                    const nextFile =
+                        newFiles[
+                        Math.max(
+                            0,
+                            index - 1
+                        )
+                        ];
+
+
+                    if (nextFile) {
+
+                        activeFile.set(
+                            nextFile
+                        );
+
+                        return nextFile.path;
+
+                    }
+
+
+                    activeFile.set(null);
+
+                    return null;
+
+                }
             );
 
+
+            return newFiles;
+
         }
-
-    }
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Dirty Files
-|--------------------------------------------------------------------------
-*/
-
-export function getDirtyFiles():
-    OpenFile[] {
-
-    return get(
-        openedFiles
-    ).filter(
-        (file) =>
-            file.isDirty
     );
 
 }

@@ -52,9 +52,37 @@ function createWindow() {
     |--------------------------------------------------------------------------
     */
 
-    window.loadURL(
-        "http://localhost:5173"
-    );
+    /*
+    |--------------------------------------------------------------------------
+    | Load Application
+    |--------------------------------------------------------------------------
+    |
+    | In development, load from Vite dev server.
+    | In production, load the built files from disk.
+    |
+    */
+
+    const isDev =
+        !app.isPackaged;
+
+    if (isDev) {
+
+        window.loadURL(
+            "http://localhost:5173"
+        );
+
+    } else {
+
+        window.loadFile(
+            path.join(
+                __dirname,
+                "..",
+                "dist",
+                "index.html"
+            )
+        );
+
+    }
 
 
     /*
