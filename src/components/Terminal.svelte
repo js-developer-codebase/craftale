@@ -2,7 +2,8 @@
 
     import {
         onMount,
-        onDestroy
+        onDestroy,
+        tick
     } from "svelte";
 
     import { Terminal as XTerm } from "@xterm/xterm";
@@ -32,18 +33,35 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Terminal State
+    | Session Interface
     |--------------------------------------------------------------------------
     */
 
-    let terminalId =
+    interface TerminalSession {
+        id: number;
+        terminalId: number | null;
+        title: string;
+        shellName: string;
+        status: "initializing" | "running" | "exited";
+        xtermInstance: XTerm | null;
+        fitAddon: FitAddon | null;
+        container: HTMLDivElement | null;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | State
+    |--------------------------------------------------------------------------
+    */
+
+    let sessions =
+        $state<TerminalSession[]>([]);
+
+    let activeSessionId =
         $state<number | null>(null);
 
-    let shellName =
-        $state("PowerShell");
-
-    let status =
-        $state<"initializing" | "running" | "exited">("initializing");
+    let nextSessionNumber = 1;
 
     let previousCwd =
         $state("");
@@ -51,114 +69,27 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Auto-navigate terminal when workspace folder changes
+    | Derived: Active Session
     |--------------------------------------------------------------------------
     */
 
-    $effect(() => {
-
-        const targetCwd = cwd;
-
-        if (
-            targetCwd &&
-            targetCwd !== previousCwd
-        ) {
-
-            previousCwd = targetCwd;
-
-            if (
-                terminalId !== null &&
-                status === "running" &&
-                window.craftale?.terminal
-            ) {
-
-                window.craftale.terminal.write(
-                    terminalId,
-                    `Set-Location -LiteralPath "${targetCwd}"\r`
-                );
-
-            }
-
-        }
-
-    });
+    let activeSession = $derived(
+        sessions.find((s) => s.id === activeSessionId) ??
+        sessions[0] ??
+        null
+    );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Auto-fit & focus when made visible via Ctrl + `
+    | Cleanup Handlers
     |--------------------------------------------------------------------------
     */
 
-    $effect(() => {
-
-        if (
-            $isTerminalVisible &&
-            xtermInstance &&
-            fitAddon
-        ) {
-
-            setTimeout(() => {
-
-                try {
-
-                    fitAddon?.fit();
-
-                    xtermInstance?.focus();
-
-                } catch {
-
-                    // Ignore layout transitions
-
-                }
-
-            }, 50);
-
-        }
-
-    });
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | DOM Container Reference
-    |--------------------------------------------------------------------------
-    */
-
-    let terminalContainer:
-        HTMLDivElement;
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | xterm Instances
-    |--------------------------------------------------------------------------
-    */
-
-    let xtermInstance: XTerm | null =
-        null;
-
-    let fitAddon: FitAddon | null =
-        null;
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Event Cleanup Handlers
-    |--------------------------------------------------------------------------
-    */
-
-    let removeDataListener:
-        (() => void) | null = null;
-
-    let removeExitListener:
-        (() => void) | null = null;
-
-    let resizeObserver:
-        ResizeObserver | null = null;
-
-    let resizeDebounceTimer:
-        ReturnType<typeof setTimeout> | null = null;
+    let removeDataListener: (() => void) | null = null;
+    let removeExitListener: (() => void) | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 
     /*
@@ -167,9 +98,9 @@
     |--------------------------------------------------------------------------
     */
 
-    function getSafeDimensions(): { cols: number; rows: number } {
+    function getSafeDimensions(session: TerminalSession): { cols: number; rows: number } {
 
-        if (!xtermInstance || !fitAddon) {
+        if (!session.xtermInstance || !session.fitAddon) {
 
             return { cols: 80, rows: 24 };
 
@@ -179,8 +110,7 @@
         try {
 
             const proposed =
-                fitAddon.proposeDimensions();
-
+                session.fitAddon.proposeDimensions();
 
             if (
                 proposed &&
@@ -200,10 +130,10 @@
 
 
         const cols =
-            xtermInstance.cols > 0 ? xtermInstance.cols : 80;
+            session.xtermInstance.cols > 0 ? session.xtermInstance.cols : 80;
 
         const rows =
-            xtermInstance.rows > 0 ? xtermInstance.rows : 24;
+            session.xtermInstance.rows > 0 ? session.xtermInstance.rows : 24;
 
 
         return { cols, rows };
@@ -213,203 +143,377 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Create & Start Terminal
+    | Create New Terminal Session
     |--------------------------------------------------------------------------
     */
 
-    async function startTerminal() {
+    async function createNewSession(targetCwd?: string) {
 
-        status = "initializing";
+        const sessionNumber = nextSessionNumber++;
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Initialize xterm if not already created
-        |--------------------------------------------------------------------------
-        */
-
-        if (!xtermInstance) {
-
-            xtermInstance = new XTerm({
-
-                cursorBlink: true,
-
-                cursorStyle: "bar",
-
-                fontSize: 13,
-
-                fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace",
-
-                lineHeight: 1.2,
-
-                theme: {
-
-                    background: "#1e1e1e",
-
-                    foreground: "#cccccc",
-
-                    cursor: "#ffffff",
-
-                    selectionBackground: "#264f78",
-
-                    black: "#000000",
-
-                    red: "#cd3131",
-
-                    green: "#0dbc79",
-
-                    yellow: "#e5e510",
-
-                    blue: "#2472c8",
-
-                    magenta: "#bc3fbc",
-
-                    cyan: "#11a8cd",
-
-                    white: "#e5e5e5",
-
-                    brightBlack: "#666666",
-
-                    brightRed: "#f14c4c",
-
-                    brightGreen: "#23d18b",
-
-                    brightYellow: "#f5f543",
-
-                    brightBlue: "#3b8eea",
-
-                    brightMagenta: "#d670d6",
-
-                    brightCyan: "#29b8db",
-
-                    brightWhite: "#e5e5e5"
-
-                },
-
-                scrollback: 5000,
-
-                allowProposedApi: true,
-
-                convertEol: false
-
-            });
+        const newSession: TerminalSession = {
+            id: sessionNumber,
+            terminalId: null,
+            title: `${sessionNumber}: PowerShell`,
+            shellName: "PowerShell",
+            status: "initializing",
+            xtermInstance: null,
+            fitAddon: null,
+            container: null
+        };
 
 
-            fitAddon = new FitAddon();
-
-            xtermInstance.loadAddon(fitAddon);
-
-            xtermInstance.loadAddon(new WebLinksAddon());
+        sessions = [...sessions, newSession];
+        activeSessionId = newSession.id;
 
 
-            xtermInstance.open(terminalContainer);
+        // Wait for Svelte to mount the container element in DOM
+        await tick();
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | User Input -> Send to PTY
-            |--------------------------------------------------------------------------
-            */
+        const session = sessions.find((s) => s.id === newSession.id);
 
-            xtermInstance.onData((data: string) => {
+        if (!session || !session.container) {
 
-                if (
-                    terminalId !== null &&
-                    status === "running" &&
-                    window.craftale?.terminal
-                ) {
-
-                    window.craftale.terminal.write(
-                        terminalId,
-                        data
-                    );
-
-                }
-
-            });
-
-        } else {
-
-            xtermInstance.clear();
+            return;
 
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Fit dimensions
+        | Initialize xterm
+        |--------------------------------------------------------------------------
+        */
+
+        const xterm = new XTerm({
+
+            cursorBlink: true,
+
+            cursorStyle: "bar",
+
+            fontSize: 13,
+
+            fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace",
+
+            lineHeight: 1.2,
+
+            theme: {
+
+                background: "#1e1e1e",
+
+                foreground: "#cccccc",
+
+                cursor: "#ffffff",
+
+                selectionBackground: "#264f78",
+
+                black: "#000000",
+
+                red: "#cd3131",
+
+                green: "#0dbc79",
+
+                yellow: "#e5e510",
+
+                blue: "#2472c8",
+
+                magenta: "#bc3fbc",
+
+                cyan: "#11a8cd",
+
+                white: "#e5e5e5",
+
+                brightBlack: "#666666",
+
+                brightRed: "#f14c4c",
+
+                brightGreen: "#23d18b",
+
+                brightYellow: "#f5f543",
+
+                brightBlue: "#3b8eea",
+
+                brightMagenta: "#d670d6",
+
+                brightCyan: "#29b8db",
+
+                brightWhite: "#e5e5e5"
+
+            },
+
+            scrollback: 5000,
+
+            allowProposedApi: true,
+
+            convertEol: false
+
+        });
+
+
+        const fitAddon = new FitAddon();
+
+        xterm.loadAddon(fitAddon);
+
+        xterm.loadAddon(new WebLinksAddon());
+
+        xterm.open(session.container);
+
+
+        session.xtermInstance = xterm;
+
+        session.fitAddon = fitAddon;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | User Keystrokes -> Send to PTY
+        |--------------------------------------------------------------------------
+        */
+
+        xterm.onData((data: string) => {
+
+            if (
+                session.terminalId !== null &&
+                session.status === "running" &&
+                window.craftale?.terminal
+            ) {
+
+                window.craftale.terminal.write(
+                    session.terminalId,
+                    data
+                );
+
+            }
+
+        });
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Fit Dimensions & Spawn PTY
         |--------------------------------------------------------------------------
         */
 
         try {
 
-            fitAddon?.fit();
+            fitAddon.fit();
 
         } catch {
 
-            // Container may still be rendering
+            // Container sizing
 
         }
 
 
         const { cols, rows } =
-            getSafeDimensions();
+            getSafeDimensions(session);
+
+        const initialDir =
+            targetCwd || cwd || undefined;
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Setup IPC listeners BEFORE spawning
-        |--------------------------------------------------------------------------
-        */
+        try {
 
-        removeDataListener?.();
+            const result =
+                await window.craftale.terminal.create(
+                    initialDir,
+                    cols,
+                    rows
+                );
 
-        removeExitListener?.();
+
+            session.terminalId =
+                result.terminalId;
+
+            session.shellName =
+                result.shell
+                    .replace(".exe", "")
+                    .replace(/^.*[/\\]/, "");
+
+            session.title =
+                `${session.id}: ${session.shellName}`;
+
+            session.status =
+                "running";
 
 
-        removeDataListener =
-            window.craftale.terminal.onData(
-                (id: number, data: string) => {
+            // Trigger reactivity
+            sessions = [...sessions];
 
-                    if (
-                        terminalId === null ||
-                        id === terminalId
-                    ) {
 
-                        xtermInstance?.write(data);
+            xterm.focus();
 
-                    }
+        } catch (error) {
+
+            console.error(`[TERMINAL] Failed to spawn session ${session.id}:`, error);
+
+            session.status = "exited";
+
+            sessions = [...sessions];
+
+            xterm.write(`\r\n\x1b[31mFailed to start terminal: ${error}\x1b[0m\r\n`);
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Switch Active Terminal
+    |--------------------------------------------------------------------------
+    */
+
+    async function switchSession(sessionId: number) {
+
+        activeSessionId = sessionId;
+
+        await tick();
+
+
+        const session = sessions.find((s) => s.id === sessionId);
+
+        if (session && session.xtermInstance && session.fitAddon) {
+
+            setTimeout(() => {
+
+                try {
+
+                    session.fitAddon?.fit();
+
+                    session.xtermInstance?.focus();
+
+                } catch {
+
+                    // Ignore
 
                 }
-            );
+
+            }, 30);
+
+        }
+
+    }
 
 
-        removeExitListener =
-            window.craftale.terminal.onExit(
-                (id: number, exitCode: number) => {
+    /*
+    |--------------------------------------------------------------------------
+    | Close / Kill Specific Terminal Session
+    |--------------------------------------------------------------------------
+    */
 
-                    if (
-                        terminalId === null ||
-                        id === terminalId
-                    ) {
+    async function closeSession(sessionId: number) {
 
-                        status = "exited";
+        const session = sessions.find((s) => s.id === sessionId);
 
-                        xtermInstance?.write(
-                            `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m\r\n`
-                        );
+        if (!session) {
 
-                    }
+            return;
 
-                }
-            );
+        }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Spawn Shell
-        |--------------------------------------------------------------------------
-        */
+        if (session.terminalId !== null) {
+
+            try {
+
+                await window.craftale.terminal.kill(session.terminalId);
+
+            } catch {
+
+                // Already dead
+
+            }
+
+        }
+
+
+        session.xtermInstance?.dispose();
+
+
+        const remaining = sessions.filter((s) => s.id !== sessionId);
+
+        sessions = remaining;
+
+
+        if (activeSessionId === sessionId) {
+
+            const next = remaining[remaining.length - 1];
+
+            activeSessionId = next ? next.id : null;
+
+            if (next) {
+
+                await tick();
+
+                setTimeout(() => {
+
+                    next.fitAddon?.fit();
+
+                    next.xtermInstance?.focus();
+
+                }, 30);
+
+            }
+
+        }
+
+
+        // If no terminals left, create a fresh one
+        if (sessions.length === 0) {
+
+            createNewSession();
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Restart Active Terminal
+    |--------------------------------------------------------------------------
+    */
+
+    async function restartActiveSession() {
+
+        const current = activeSession;
+
+        if (!current) {
+
+            return;
+
+        }
+
+
+        if (current.terminalId !== null) {
+
+            try {
+
+                await window.craftale.terminal.kill(current.terminalId);
+
+            } catch {
+
+                // Ignore
+
+            }
+
+            current.terminalId = null;
+
+        }
+
+
+        current.status = "initializing";
+
+        current.xtermInstance?.clear();
+
+        sessions = [...sessions];
+
+
+        const { cols, rows } =
+            getSafeDimensions(current);
+
 
         try {
 
@@ -421,31 +525,39 @@
                 );
 
 
-            terminalId =
-                result.terminalId;
+            current.terminalId = result.terminalId;
 
-            shellName =
-                result.shell
-                    .replace(".exe", "")
-                    .replace(/^.*[/\\]/, "");
+            current.status = "running";
 
-            status = "running";
+            sessions = [...sessions];
 
 
-            // Focus xterm
-            xtermInstance?.focus();
+            current.xtermInstance?.focus();
 
         } catch (error) {
 
-            console.error("[TERMINAL] Spawn failed:", error);
+            current.status = "exited";
 
-            status = "exited";
+            sessions = [...sessions];
 
-            xtermInstance?.write(
-                `\r\n\x1b[31mFailed to start terminal: ${error}\x1b[0m\r\n`
-            );
+            current.xtermInstance?.write(`\r\n\x1b[31mFailed to restart terminal: ${error}\x1b[0m\r\n`);
 
         }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Clear Active Terminal
+    |--------------------------------------------------------------------------
+    */
+
+    function clearActiveSession() {
+
+        activeSession?.xtermInstance?.clear();
+
+        activeSession?.xtermInstance?.focus();
 
     }
 
@@ -467,7 +579,9 @@
 
         resizeDebounceTimer = setTimeout(() => {
 
-            if (!fitAddon || !xtermInstance) {
+            const current = activeSession;
+
+            if (!current || !current.fitAddon || !current.xtermInstance) {
 
                 return;
 
@@ -476,21 +590,21 @@
 
             try {
 
-                fitAddon.fit();
+                current.fitAddon.fit();
 
                 const { cols, rows } =
-                    getSafeDimensions();
+                    getSafeDimensions(current);
 
 
                 if (
-                    terminalId !== null &&
-                    status === "running" &&
+                    current.terminalId !== null &&
+                    current.status === "running" &&
                     cols > 0 &&
                     rows > 0
                 ) {
 
                     window.craftale.terminal.resize(
-                        terminalId,
+                        current.terminalId,
                         cols,
                         rows
                     );
@@ -510,74 +624,76 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Clear Terminal
+    | Auto-navigate active terminal when workspace folder changes
     |--------------------------------------------------------------------------
     */
 
-    function clearTerminal() {
+    $effect(() => {
 
-        xtermInstance?.clear();
+        const targetCwd = cwd;
 
-        xtermInstance?.focus();
+        if (
+            targetCwd &&
+            targetCwd !== previousCwd
+        ) {
 
-    }
+            previousCwd = targetCwd;
+
+            const current = activeSession;
+
+            if (
+                current &&
+                current.terminalId !== null &&
+                current.status === "running" &&
+                window.craftale?.terminal
+            ) {
+
+                window.craftale.terminal.write(
+                    current.terminalId,
+                    `Set-Location -LiteralPath "${targetCwd}"\r`
+                );
+
+            }
+
+        }
+
+    });
 
 
     /*
     |--------------------------------------------------------------------------
-    | Restart Terminal
+    | Auto-fit & focus when made visible via Ctrl + `
     |--------------------------------------------------------------------------
     */
 
-    async function restartTerminal() {
+    $effect(() => {
 
-        if (terminalId !== null) {
+        if (
+            $isTerminalVisible &&
+            activeSession &&
+            activeSession.xtermInstance &&
+            activeSession.fitAddon
+        ) {
 
-            try {
+            setTimeout(() => {
 
-                await window.craftale.terminal.kill(terminalId);
+                try {
 
-            } catch {
+                    activeSession?.fitAddon?.fit();
 
-                // Ignore
+                    activeSession?.xtermInstance?.focus();
 
-            }
+                } catch {
 
-            terminalId = null;
+                    // Ignore layout transitions
 
-        }
+                }
 
-
-        await startTerminal();
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Kill Terminal
-    |--------------------------------------------------------------------------
-    */
-
-    async function killTerminal() {
-
-        if (terminalId !== null) {
-
-            try {
-
-                await window.craftale.terminal.kill(terminalId);
-
-            } catch {
-
-                // Ignore
-
-            }
-
-            status = "exited";
+            }, 50);
 
         }
 
-    }
+    });
 
 
     /*
@@ -588,19 +704,64 @@
 
     onMount(() => {
 
-        startTerminal();
+        // Global IPC listeners routed to the appropriate session by terminalId
+        removeDataListener =
+            window.craftale.terminal.onData(
+                (terminalId: number, data: string) => {
+
+                    const session =
+                        sessions.find((s) => s.terminalId === terminalId);
+
+                    if (session && session.xtermInstance) {
+
+                        session.xtermInstance.write(data);
+
+                    }
+
+                }
+            );
 
 
-        resizeObserver = new ResizeObserver(() => {
+        removeExitListener =
+            window.craftale.terminal.onExit(
+                (terminalId: number, exitCode: number) => {
 
-            handleResize();
+                    const session =
+                        sessions.find((s) => s.terminalId === terminalId);
 
-        });
+                    if (session) {
+
+                        session.status = "exited";
+
+                        sessions = [...sessions];
+
+                        session.xtermInstance?.write(
+                            `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m\r\n`
+                        );
+
+                    }
+
+                }
+            );
 
 
-        if (terminalContainer) {
+        // Spawn initial terminal
+        createNewSession();
 
-            resizeObserver.observe(terminalContainer);
+
+        // Observe body for resize
+        const bodyElement =
+            document.querySelector(".terminal-body");
+
+        if (bodyElement) {
+
+            resizeObserver = new ResizeObserver(() => {
+
+                handleResize();
+
+            });
+
+            resizeObserver.observe(bodyElement);
 
         }
 
@@ -637,18 +798,19 @@
         removeExitListener = null;
 
 
-        if (terminalId !== null) {
+        for (const session of sessions) {
 
-            window.craftale.terminal.kill(terminalId).catch(() => {});
+            if (session.terminalId !== null) {
 
-            terminalId = null;
+                window.craftale.terminal.kill(session.terminalId).catch(() => {});
+
+            }
+
+            session.xtermInstance?.dispose();
 
         }
 
-
-        xtermInstance?.dispose();
-
-        xtermInstance = null;
+        sessions = [];
 
     });
 
@@ -657,37 +819,77 @@
 
 <div class="terminal">
 
-    <!-- Header -->
+    <!-- Header / Tab Bar -->
     <div class="terminal-header">
 
-        <div class="terminal-title">
+        <!-- Tabs List -->
+        <div class="terminal-tabs" role="tablist">
 
-            <span class="terminal-icon">&gt;_</span>
+            {#each sessions as session (session.id)}
 
-            <span class="terminal-name">TERMINAL</span>
+                <div
+                    class="terminal-tab"
+                    class:active={session.id === activeSessionId}
+                    onclick={() => switchSession(session.id)}
+                    role="tab"
+                    tabindex="0"
+                    aria-selected={session.id === activeSessionId}
+                    title={session.title}
+                >
 
-            <span class="shell">{shellName}</span>
+                    <span class="tab-icon">&gt;_</span>
 
-            {#if status === "exited"}
+                    <span class="tab-title">{session.title}</span>
 
-                <span class="badge exited">(exited)</span>
+                    {#if session.status === "exited"}
 
-            {:else if status === "initializing"}
+                        <span class="tab-badge exited" title="Process Exited">●</span>
 
-                <span class="badge starting">(starting...)</span>
+                    {:else if session.status === "initializing"}
 
-            {/if}
+                        <span class="tab-badge starting" title="Starting...">◌</span>
+
+                    {/if}
+
+                    <button
+                        type="button"
+                        class="tab-close"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            closeSession(session.id);
+                        }}
+                        title="Close Terminal"
+                        aria-label="Close Terminal"
+                    >
+                        ×
+                    </button>
+
+                </div>
+
+            {/each}
+
+            <!-- Add Terminal Button (+) -->
+            <button
+                type="button"
+                class="tab-add-button"
+                onclick={() => createNewSession()}
+                title="New Terminal"
+                aria-label="New Terminal"
+            >
+                +
+            </button>
 
         </div>
 
 
+        <!-- Right-side Action Buttons -->
         <div class="terminal-actions">
 
             <!-- Clear -->
             <button
                 type="button"
                 class="action-button"
-                onclick={clearTerminal}
+                onclick={clearActiveSession}
                 title="Clear Terminal (Ctrl+L)"
             >
                 ⌧
@@ -697,20 +899,20 @@
             <button
                 type="button"
                 class="action-button"
-                onclick={restartTerminal}
+                onclick={restartActiveSession}
                 title="Restart Terminal"
-                disabled={status === "initializing"}
+                disabled={activeSession?.status === "initializing"}
             >
                 ↻
             </button>
 
-            <!-- Kill -->
-            {#if status === "running"}
+            <!-- Kill Active -->
+            {#if activeSession && activeSession.status === "running"}
 
                 <button
                     type="button"
                     class="action-button kill"
-                    onclick={killTerminal}
+                    onclick={() => activeSession && closeSession(activeSession.id)}
                     title="Kill Terminal Process"
                 >
                     ✕
@@ -723,14 +925,23 @@
     </div>
 
 
-    <!-- Body -->
-    <div
-        class="terminal-body"
-        bind:this={terminalContainer}
-        onclick={() => xtermInstance?.focus()}
-        role="region"
-        aria-label="Terminal output and input"
-    ></div>
+    <!-- Body with Per-Session Containers -->
+    <div class="terminal-body">
+
+        {#each sessions as session (session.id)}
+
+            <div
+                class="session-container"
+                class:active={session.id === activeSessionId}
+                bind:this={session.container}
+                onclick={() => session.xtermInstance?.focus()}
+                role="region"
+                aria-label={session.title}
+            ></div>
+
+        {/each}
+
+    </div>
 
 </div>
 
@@ -753,53 +964,134 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 10px;
         background: #252526;
         border-bottom: 1px solid #333333;
         user-select: none;
+        padding-right: 8px;
     }
 
-    .terminal-title {
+    /* Tabs */
+    .terminal-tabs {
         display: flex;
         align-items: center;
-        gap: 8px;
+        height: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+
+    .terminal-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .terminal-tab {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        background: #2d2d2d;
+        border-right: 1px solid #252526;
+        color: #969696;
+        cursor: pointer;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 11px;
-        font-weight: 600;
+        white-space: nowrap;
+        max-width: 160px;
+        transition: background 0.1s;
     }
 
-    .terminal-icon {
-        color: #4ec9b0;
-        font-weight: 700;
-    }
-
-    .terminal-name {
+    .terminal-tab:hover {
+        background: #323233;
         color: #cccccc;
     }
 
-    .shell {
-        color: #858585;
-        font-size: 10px;
-        font-weight: 400;
+    .terminal-tab.active {
+        background: #1e1e1e;
+        color: #ffffff;
+        border-top: 1px solid #007acc;
     }
 
-    .badge {
+    .tab-icon {
+        color: #4ec9b0;
+        font-weight: 700;
         font-size: 10px;
-        font-weight: 400;
+        flex-shrink: 0;
     }
 
-    .badge.exited {
+    .tab-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tab-badge {
+        font-size: 9px;
+        flex-shrink: 0;
+    }
+
+    .tab-badge.exited {
         color: #f48771;
     }
 
-    .badge.starting {
+    .tab-badge.starting {
         color: #e5e510;
     }
 
+    .tab-close {
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #858585;
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 12px;
+        padding: 0;
+        margin-left: 2px;
+        opacity: 0.6;
+        flex-shrink: 0;
+    }
+
+    .tab-close:hover {
+        background: #3a3a3a;
+        color: #ffffff;
+        opacity: 1;
+    }
+
+    .tab-add-button {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #858585;
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 16px;
+        padding: 0;
+        margin-left: 4px;
+        flex-shrink: 0;
+    }
+
+    .tab-add-button:hover {
+        background: #3a3a3a;
+        color: #ffffff;
+    }
+
+    /* Actions */
     .terminal-actions {
         display: flex;
         align-items: center;
         gap: 2px;
+        flex-shrink: 0;
     }
 
     .action-button {
@@ -833,38 +1125,51 @@
         background: #3a3a3a;
     }
 
+    /* Body & Containers */
     .terminal-body {
         flex: 1;
         min-height: 0;
+        position: relative;
         overflow: hidden;
-        padding: 4px 6px 0 6px;
         background: #1e1e1e;
     }
 
-    .terminal-body :global(.xterm) {
+    .session-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+        padding: 4px 6px 0 6px;
+        box-sizing: border-box;
+    }
+
+    .session-container.active {
+        display: block;
+    }
+
+    .session-container :global(.xterm) {
         height: 100%;
         padding: 2px 0;
     }
 
-    .terminal-body :global(.xterm-viewport) {
+    .session-container :global(.xterm-viewport) {
         overflow-y: auto !important;
         background-color: #1e1e1e !important;
     }
 
-    .terminal-body :global(.xterm-viewport::-webkit-scrollbar) {
+    .session-container :global(.xterm-viewport::-webkit-scrollbar) {
         width: 8px;
     }
 
-    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-track) {
+    .session-container :global(.xterm-viewport::-webkit-scrollbar-track) {
         background: #1e1e1e;
     }
 
-    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-thumb) {
+    .session-container :global(.xterm-viewport::-webkit-scrollbar-thumb) {
         background: #424242;
         border-radius: 4px;
     }
 
-    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
+    .session-container :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
         background: #555555;
     }
 
