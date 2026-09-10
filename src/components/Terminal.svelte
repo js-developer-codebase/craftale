@@ -10,6 +10,10 @@
     import { WebLinksAddon } from "@xterm/addon-web-links";
     import "@xterm/xterm/css/xterm.css";
 
+    import {
+        isTerminalVisible
+    } from "../stores/workspace";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -40,6 +44,79 @@
 
     let status =
         $state<"initializing" | "running" | "exited">("initializing");
+
+    let previousCwd =
+        $state("");
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Auto-navigate terminal when workspace folder changes
+    |--------------------------------------------------------------------------
+    */
+
+    $effect(() => {
+
+        const targetCwd = cwd;
+
+        if (
+            targetCwd &&
+            targetCwd !== previousCwd
+        ) {
+
+            previousCwd = targetCwd;
+
+            if (
+                terminalId !== null &&
+                status === "running" &&
+                window.craftale?.terminal
+            ) {
+
+                window.craftale.terminal.write(
+                    terminalId,
+                    `Set-Location -LiteralPath "${targetCwd}"\r`
+                );
+
+            }
+
+        }
+
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Auto-fit & focus when made visible via Ctrl + `
+    |--------------------------------------------------------------------------
+    */
+
+    $effect(() => {
+
+        if (
+            $isTerminalVisible &&
+            xtermInstance &&
+            fitAddon
+        ) {
+
+            setTimeout(() => {
+
+                try {
+
+                    fitAddon?.fit();
+
+                    xtermInstance?.focus();
+
+                } catch {
+
+                    // Ignore layout transitions
+
+                }
+
+            }, 50);
+
+        }
+
+    });
 
 
     /*

@@ -1,6 +1,7 @@
 <script lang="ts">
 
     import { openFile } from "../stores/workspace";
+    import FileTreeItem from "./FileTreeItem.svelte";
 
 
     /*
@@ -251,7 +252,7 @@
                     child.path
                 )}
 
-                    <svelte:self
+                    <FileTreeItem
                         item={child}
                     />
 

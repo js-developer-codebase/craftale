@@ -8,6 +8,10 @@
     import FileTreeItem
         from "./FileTreeItem.svelte";
 
+    import {
+        setWorkspace
+    } from "../stores/workspace";
+
 
     type FileItem = {
 
@@ -65,6 +69,10 @@
 
 
             rootPath = folderPath;
+
+            setWorkspace(
+                folderPath
+            );
 
 
         } catch (err) {
@@ -224,7 +232,6 @@
 
                     <FileTreeItem
                         item={item}
-                        level={0}
                     />
 
                 {/each}

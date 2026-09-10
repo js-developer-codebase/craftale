@@ -1,5 +1,10 @@
 <script lang="ts">
 
+    import {
+        onMount,
+        onDestroy
+    } from "svelte";
+
     import FileExplorer
         from "./components/FileExplorer.svelte";
 
@@ -11,8 +16,11 @@
     import Terminal
         from "./components/Terminal.svelte";
 
-    import { workspacePath }
-        from "./stores/workspace";
+    import {
+        workspacePath,
+        isTerminalVisible,
+        toggleTerminal
+    } from "./stores/workspace";
 
 
     /*
@@ -22,6 +30,56 @@
     */
 
     let terminalHeight = 250;
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Global Keydown: Ctrl + ` (Toggle Terminal)
+    |--------------------------------------------------------------------------
+    */
+
+    function handleGlobalKeyDown(event: KeyboardEvent) {
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            (
+                event.key === "`" ||
+                event.key === "~" ||
+                event.code === "Backquote"
+            )
+        ) {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            toggleTerminal();
+
+        }
+
+    }
+
+
+    onMount(() => {
+
+        window.addEventListener(
+            "keydown",
+            handleGlobalKeyDown,
+            true
+        );
+
+    });
+
+
+    onDestroy(() => {
+
+        window.removeEventListener(
+            "keydown",
+            handleGlobalKeyDown,
+            true
+        );
+
+    });
 
 </script>
 
@@ -72,6 +130,7 @@
 
         <section
             class="terminal-area"
+            class:hidden={!$isTerminalVisible}
             style={`height: ${terminalHeight}px`}
         >
 
@@ -269,6 +328,14 @@
 
         overflow:
             hidden;
+
+    }
+
+
+    .terminal-area.hidden {
+
+        display:
+            none !important;
 
     }
 

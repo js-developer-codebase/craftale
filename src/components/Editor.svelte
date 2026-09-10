@@ -20,7 +20,8 @@
         updateFileContent,
         saveFile,
         activateFile,
-        closeFile
+        closeFile,
+        toggleTerminal
     } from "../stores/workspace";
 
 
@@ -738,6 +739,21 @@
 
                     }
                 );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Ctrl + ` Toggle Terminal Command
+            |--------------------------------------------------------------------------
+            */
+
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd |
+                monaco.KeyCode.Backquote,
+                () => {
+                    toggleTerminal();
+                }
+            );
 
 
             /*

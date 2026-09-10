@@ -62,6 +62,30 @@ export const workspacePath =
 
 /*
 |--------------------------------------------------------------------------
+| Terminal Visibility
+|--------------------------------------------------------------------------
+*/
+
+export const isTerminalVisible =
+    writable<boolean>(true);
+
+
+export function toggleTerminal(
+    visible?: boolean
+) {
+
+    isTerminalVisible.update(
+        (current) =>
+            visible !== undefined
+                ? visible
+                : !current
+    );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Set Workspace
 |--------------------------------------------------------------------------
 */
