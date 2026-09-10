@@ -296,24 +296,40 @@
 
         } else {
 
-            handleFileClick();
+            handleFileClick(true);
 
         }
 
     }
 
 
-    async function handleFileClick() {
+    function handleDoubleClick(event: MouseEvent) {
+
+        event.stopPropagation();
+
+        if (item.type !== "directory") {
+
+            handleFileClick(false);
+
+        }
+
+    }
+
+
+    async function handleFileClick(preview = true) {
 
         try {
 
             const content = await window.craftale.filesystem.readFile(item.path);
 
-            openFile({
-                name: item.name,
-                path: item.path,
-                content
-            });
+            openFile(
+                {
+                    name: item.name,
+                    path: item.path,
+                    content
+                },
+                { preview }
+            );
 
         } catch (error) {
 
@@ -562,6 +578,7 @@
         tabindex="0"
         draggable={!isRenaming}
         onclick={handleClick}
+        ondblclick={handleDoubleClick}
         oncontextmenu={handleContextMenu}
         ondragstart={handleDragStart}
         ondragover={handleDragOver}

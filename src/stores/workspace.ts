@@ -18,7 +18,61 @@ export type OpenFile = {
 
     isDirty?: boolean;
 
+    isPinned?: boolean;
+
+    isPreview?: boolean;
+
 };
+
+
+/*
+|--------------------------------------------------------------------------
+| Closed Tab History (for Reopen Closed Tab)
+|--------------------------------------------------------------------------
+*/
+
+export interface ClosedTabRecord {
+
+    path: string;
+
+    name: string;
+
+}
+
+export const recentlyClosedTabs =
+    writable<ClosedTabRecord[]>([]);
+
+
+export function recordClosedTab(file: ClosedTabRecord) {
+
+    recentlyClosedTabs.update(tabs => {
+
+        const filtered = tabs.filter(t => !pathsEqual(t.path, file.path));
+
+        return [file, ...filtered].slice(0, 25);
+
+    });
+
+}
+
+
+export function popClosedTab(): ClosedTabRecord | null {
+
+    let popped: ClosedTabRecord | null = null;
+
+    recentlyClosedTabs.update(tabs => {
+
+        if (tabs.length === 0) return tabs;
+
+        popped = tabs[0];
+
+        return tabs.slice(1);
+
+    });
+
+    return popped;
+
+}
 
 
 /*
@@ -139,51 +193,261 @@ export function setWorkspace(
 */
 
 export function openFile(
-    file: OpenFile
+    file: OpenFile,
+    options?: { preview?: boolean; pinned?: boolean }
 ) {
 
     console.log(
         "[STORE] Opening file:",
-        file.path
+        file.path,
+        options
     );
 
+    const isPreview = options?.preview ?? false;
 
-    openedFiles.update(
-        files => {
+    const isPinned = options?.pinned ?? false;
 
-            const exists =
-                files.some(
-                    item =>
-                        pathsEqual(
-                            item.path,
-                            file.path
-                        )
-                );
+    let activatedDoc: OpenFile = {
+        ...file,
+        isDirty: file.isDirty ?? false,
+        isPinned,
+        isPreview
+    };
 
 
-            if (exists) {
+    openedFiles.update(files => {
 
-                return files;
+        const existingIndex = files.findIndex(item => pathsEqual(item.path, file.path));
+
+        if (existingIndex !== -1) {
+
+            const existing = files[existingIndex];
+
+            const updated: OpenFile = {
+                ...existing,
+                isPreview: isPreview ? existing.isPreview : false,
+                isPinned: isPinned || existing.isPinned
+            };
+
+            activatedDoc = updated;
+
+            return files.map((f, i) => (i === existingIndex ? updated : f));
+
+        }
+
+
+        /* If requested as preview, replace an existing unpinned clean preview tab */
+
+        if (isPreview) {
+
+            const previewIndex = files.findIndex(
+                f => f.isPreview && !f.isDirty && !f.isPinned
+            );
+
+            if (previewIndex !== -1) {
+
+                const replacedTab = files[previewIndex];
+
+                recordClosedTab({ path: replacedTab.path, name: replacedTab.name });
+
+                const replaced: OpenFile = {
+                    ...file,
+                    isDirty: false,
+                    isPinned: false,
+                    isPreview: true
+                };
+
+                activatedDoc = replaced;
+
+                return files.map((f, i) => (i === previewIndex ? replaced : f));
 
             }
 
+        }
 
-            return [
-                ...files,
-                {
-                    ...file,
-                    isDirty:
-                        file.isDirty ?? false
+
+        const newDoc: OpenFile = {
+            ...file,
+            isDirty: file.isDirty ?? false,
+            isPinned,
+            isPreview
+        };
+
+        activatedDoc = newDoc;
+
+
+        if (isPinned) {
+
+            let lastPinnedIdx = -1;
+
+            for (let i = files.length - 1; i >= 0; i--) {
+
+                if (files[i].isPinned) {
+
+                    lastPinnedIdx = i;
+
+                    break;
+
                 }
-            ];
+
+            }
+
+            if (lastPinnedIdx === -1) {
+
+                return [newDoc, ...files];
+
+            } else {
+
+                const nextFiles = [...files];
+
+                nextFiles.splice(lastPinnedIdx + 1, 0, newDoc);
+
+                return nextFiles;
+
+            }
 
         }
+
+
+        return [...files, newDoc];
+
+    });
+
+
+    activeFile.set(activatedDoc);
+
+    activePath.set(activatedDoc.path);
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Promote Preview Tab to Permanent
+|--------------------------------------------------------------------------
+*/
+
+export function promotePreviewTab(path: string) {
+
+    openedFiles.update(files =>
+        files.map(f => (pathsEqual(f.path, path) ? { ...f, isPreview: false } : f))
     );
 
+    activeFile.update(f =>
+        f && pathsEqual(f.path, path) ? { ...f, isPreview: false } : f
+    );
 
-    activeFile.set(file);
+}
 
-    activePath.set(file.path);
+
+/*
+|--------------------------------------------------------------------------
+| Pin Tab
+|--------------------------------------------------------------------------
+*/
+
+export function pinTab(path: string) {
+
+    openedFiles.update(files => {
+
+        const target = files.find(f => pathsEqual(f.path, path));
+
+        if (!target) return files;
+
+        const updatedTarget: OpenFile = {
+            ...target,
+            isPinned: true,
+            isPreview: false
+        };
+
+        const others = files.filter(f => !pathsEqual(f.path, path));
+
+        const pinned = others.filter(f => f.isPinned);
+
+        const unpinned = others.filter(f => !f.isPinned);
+
+        return [...pinned, updatedTarget, ...unpinned];
+
+    });
+
+    activeFile.update(f =>
+        f && pathsEqual(f.path, path) ? { ...f, isPinned: true, isPreview: false } : f
+    );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Unpin Tab
+|--------------------------------------------------------------------------
+*/
+
+export function unpinTab(path: string) {
+
+    openedFiles.update(files => {
+
+        const target = files.find(f => pathsEqual(f.path, path));
+
+        if (!target) return files;
+
+        const updatedTarget: OpenFile = {
+            ...target,
+            isPinned: false
+        };
+
+        const others = files.filter(f => !pathsEqual(f.path, path));
+
+        const pinned = others.filter(f => f.isPinned);
+
+        const unpinned = others.filter(f => !f.isPinned);
+
+        return [...pinned, updatedTarget, ...unpinned];
+
+    });
+
+    activeFile.update(f =>
+        f && pathsEqual(f.path, path) ? { ...f, isPinned: false } : f
+    );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Reorder Tabs (Drag & Drop)
+|--------------------------------------------------------------------------
+*/
+
+export function reorderTabs(fromIndex: number, toIndex: number) {
+
+    openedFiles.update(files => {
+
+        if (
+            fromIndex < 0 ||
+            fromIndex >= files.length ||
+            toIndex < 0 ||
+            toIndex >= files.length ||
+            fromIndex === toIndex
+        ) {
+
+            return files;
+
+        }
+
+        const reordered = [...files];
+
+        const [moved] = reordered.splice(fromIndex, 1);
+
+        reordered.splice(toIndex, 0, moved);
+
+        const pinned = reordered.filter(f => f.isPinned);
+
+        const unpinned = reordered.filter(f => !f.isPinned);
+
+        return [...pinned, ...unpinned];
+
+    });
 
 }
 
@@ -266,7 +530,9 @@ export function updateFileContent(
 
                         content,
 
-                        isDirty: true
+                        isDirty: true,
+
+                        isPreview: false
 
                     };
 
@@ -296,7 +562,9 @@ export function updateFileContent(
 
                 content,
 
-                isDirty: true
+                isDirty: true,
+
+                isPreview: false
 
             };
 
@@ -338,7 +606,9 @@ export function markFileSaved(
 
                         content,
 
-                        isDirty: false
+                        isDirty: false,
+
+                        isPreview: false
 
                     };
 
@@ -368,7 +638,9 @@ export function markFileSaved(
 
                 content,
 
-                isDirty: false
+                isDirty: false,
+
+                isPreview: false
 
             };
 
@@ -481,6 +753,11 @@ export function closeFile(
             }
 
 
+            const fileToClose = files[index];
+
+            recordClosedTab({ path: fileToClose.path, name: fileToClose.name });
+
+
             const newFiles =
                 files.filter(
                     file =>
@@ -538,6 +815,68 @@ export function closeFile(
 
         }
     );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Close Multiple Files (Batch Close)
+|--------------------------------------------------------------------------
+*/
+
+export function closeMultipleFiles(paths: string[]) {
+
+    openedFiles.update(files => {
+
+        const pathsToClose = new Set(
+            paths.map(p => p.replace(/\\/g, "/").toLowerCase())
+        );
+
+        files.forEach(f => {
+
+            if (pathsToClose.has(f.path.replace(/\\/g, "/").toLowerCase())) {
+
+                recordClosedTab({ path: f.path, name: f.name });
+
+            }
+
+        });
+
+        const newFiles = files.filter(
+            f => !pathsToClose.has(f.path.replace(/\\/g, "/").toLowerCase())
+        );
+
+        activePath.update(currentPath => {
+
+            if (
+                !currentPath ||
+                !pathsToClose.has(currentPath.replace(/\\/g, "/").toLowerCase())
+            ) {
+
+                return currentPath;
+
+            }
+
+            if (newFiles.length > 0) {
+
+                const nextFile = newFiles[0];
+
+                activeFile.set(nextFile);
+
+                return nextFile.path;
+
+            }
+
+            activeFile.set(null);
+
+            return null;
+
+        });
+
+        return newFiles;
+
+    });
 
 }
 

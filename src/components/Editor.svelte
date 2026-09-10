@@ -13,6 +13,11 @@
     import ConfirmModal
         from "./ConfirmModal.svelte";
 
+    import TabContextMenu
+        from "./TabContextMenu.svelte";
+
+    import BatchCloseModal
+        from "./BatchCloseModal.svelte";
 
     import {
         openedFiles,
@@ -22,7 +27,16 @@
         activateFile,
         closeFile,
         toggleTerminal,
-        pathsEqual
+        pathsEqual,
+        recentlyClosedTabs,
+        popClosedTab,
+        pinTab,
+        unpinTab,
+        promotePreviewTab,
+        reorderTabs,
+        closeMultipleFiles,
+        openFile,
+        type OpenFile
     } from "../stores/workspace";
 
     import {
@@ -75,16 +89,77 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Close Modal
+    | Close Single File Modal
     |--------------------------------------------------------------------------
     */
 
-    let showCloseModal =
-        false;
+    let showCloseModal = $state(false);
+
+    let filePendingClose = $state<string | null>(null);
 
 
-    let filePendingClose:
-        string | null = null;
+    /*
+    |--------------------------------------------------------------------------
+    | Batch Close Modal State
+    |--------------------------------------------------------------------------
+    */
+
+    let batchCloseModal = $state<{
+        visible: boolean;
+        filesToClose: OpenFile[];
+        dirtyFiles: OpenFile[];
+    }>({
+        visible: false,
+        filesToClose: [],
+        dirtyFiles: []
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Context Menu State
+    |--------------------------------------------------------------------------
+    */
+
+    let tabContextMenu = $state<{
+        visible: boolean;
+        x: number;
+        y: number;
+        targetFile: OpenFile | null;
+    }>({
+        visible: false,
+        x: 0,
+        y: 0,
+        targetFile: null
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Scrolling & Overflow State
+    |--------------------------------------------------------------------------
+    */
+
+    let tabsContainer = $state<HTMLDivElement | null>(null);
+
+    let canScrollLeft = $state(false);
+
+    let canScrollRight = $state(false);
+
+    let showMoreTabsDropdown = $state(false);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Drag and Drop State
+    |--------------------------------------------------------------------------
+    */
+
+    let draggedTabIndex = $state<number | null>(null);
+
+    let dragOverTabIndex = $state<number | null>(null);
+
+    let dropPlacement = $state<"before" | "after" | null>(null);
 
 
     /*
@@ -410,25 +485,122 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Keyboard
+    | Keyboard Shortcuts & Chord Handling
     |--------------------------------------------------------------------------
     */
+
+    let pendingChordK = false;
+
+    let chordTimeout: ReturnType<typeof setTimeout> | null = null;
+
 
     function handleKeyDown(
         event: KeyboardEvent
     ) {
 
+        /* Handle Chord K (Ctrl+K W, Ctrl+K U) */
+
+        if (pendingChordK) {
+
+            if (event.key.toLowerCase() === "w") {
+
+                event.preventDefault();
+
+                pendingChordK = false;
+
+                if (chordTimeout) clearTimeout(chordTimeout);
+
+                handleCloseAll();
+
+                return;
+
+            } else if (event.key.toLowerCase() === "u") {
+
+                event.preventDefault();
+
+                pendingChordK = false;
+
+                if (chordTimeout) clearTimeout(chordTimeout);
+
+                handleCloseSaved();
+
+                return;
+
+            } else if (event.key !== "Control" && event.key !== "Meta") {
+
+                pendingChordK = false;
+
+                if (chordTimeout) clearTimeout(chordTimeout);
+
+            }
+
+        }
+
+
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+
+            pendingChordK = true;
+
+            if (chordTimeout) clearTimeout(chordTimeout);
+
+            chordTimeout = setTimeout(() => {
+
+                pendingChordK = false;
+
+            }, 1500);
+
+            return;
+
+        }
+
+
+        /* Ctrl + S Save */
+
         if (
-            (
-                event.ctrlKey ||
-                event.metaKey
-            ) &&
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
             event.key.toLowerCase() === "s"
         ) {
 
             event.preventDefault();
 
             void saveCurrentFile();
+
+            return;
+
+        }
+
+
+        /* Ctrl + W Close Active Tab */
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === "w"
+        ) {
+
+            event.preventDefault();
+
+            closeActiveTab();
+
+            return;
+
+        }
+
+
+        /* Ctrl + Shift + T Reopen Closed Tab */
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "t"
+        ) {
+
+            event.preventDefault();
+
+            void reopenLastClosedTab();
+
+            return;
 
         }
 
@@ -437,9 +609,18 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Close Tab Click
+    | Tab Operations & Close Handlers
     |--------------------------------------------------------------------------
     */
+
+    function closeActiveTab() {
+
+        if (!$activeFile) return;
+
+        handleCloseFile($activeFile.path);
+
+    }
+
 
     function handleClose(
         event: MouseEvent,
@@ -448,6 +629,12 @@
 
         event.stopPropagation();
 
+        handleCloseFile(filePath);
+
+    }
+
+
+    function handleCloseFile(filePath: string) {
 
         const file =
             $openedFiles.find(
@@ -458,45 +645,412 @@
                     )
             );
 
+        if (!file) return;
 
-        if (!file) {
+
+        /* Clean File -> Close immediately */
+
+        if (!file.isDirty) {
+
+            performClose(filePath);
 
             return;
 
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Clean File
-        |--------------------------------------------------------------------------
-        */
+        /* Dirty File -> Show confirmation modal */
 
-        if (
-            !file.isDirty
-        ) {
+        filePendingClose = filePath;
 
-            performClose(
-                filePath
+        showCloseModal = true;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Batch Close Handlers (Close Others, Close to Right, Close Saved, Close All)
+    |--------------------------------------------------------------------------
+    */
+
+    function handleCloseOthers(targetFile: OpenFile) {
+
+        const targets = $openedFiles.filter(
+            f => !pathsEqual(f.path, targetFile.path) && !f.isPinned
+        );
+
+        if (targets.length === 0) return;
+
+        const dirty = targets.filter(f => f.isDirty);
+
+        if (dirty.length > 0) {
+
+            batchCloseModal = {
+                visible: true,
+                filesToClose: targets,
+                dirtyFiles: dirty
+            };
+
+        } else {
+
+            closeMultipleFiles(targets.map(f => f.path));
+
+        }
+
+    }
+
+
+    function handleCloseToTheRight(targetFile: OpenFile) {
+
+        const idx = $openedFiles.findIndex(f => pathsEqual(f.path, targetFile.path));
+
+        if (idx === -1) return;
+
+        const targets = $openedFiles.slice(idx + 1).filter(f => !f.isPinned);
+
+        if (targets.length === 0) return;
+
+        const dirty = targets.filter(f => f.isDirty);
+
+        if (dirty.length > 0) {
+
+            batchCloseModal = {
+                visible: true,
+                filesToClose: targets,
+                dirtyFiles: dirty
+            };
+
+        } else {
+
+            closeMultipleFiles(targets.map(f => f.path));
+
+        }
+
+    }
+
+
+    function handleCloseSaved() {
+
+        const targets = $openedFiles.filter(f => !f.isDirty && !f.isPinned);
+
+        if (targets.length === 0) return;
+
+        closeMultipleFiles(targets.map(f => f.path));
+
+        notify.info(`Closed ${targets.length} saved tabs.`);
+
+    }
+
+
+    function handleCloseAll() {
+
+        const unpinned = $openedFiles.filter(f => !f.isPinned);
+
+        const targets = unpinned.length > 0 ? unpinned : [...$openedFiles];
+
+        if (targets.length === 0) return;
+
+        const dirty = targets.filter(f => f.isDirty);
+
+        if (dirty.length > 0) {
+
+            batchCloseModal = {
+                visible: true,
+                filesToClose: targets,
+                dirtyFiles: dirty
+            };
+
+        } else {
+
+            closeMultipleFiles(targets.map(f => f.path));
+
+        }
+
+    }
+
+
+    async function handleBatchSaveAll() {
+
+        const dirty = batchCloseModal.dirtyFiles;
+
+        const all = batchCloseModal.filesToClose;
+
+        batchCloseModal.visible = false;
+
+        for (const file of dirty) {
+
+            await saveFile(file.path);
+
+        }
+
+        closeMultipleFiles(all.map(f => f.path));
+
+    }
+
+
+    function handleBatchDiscardAll() {
+
+        const all = batchCloseModal.filesToClose;
+
+        batchCloseModal.visible = false;
+
+        closeMultipleFiles(all.map(f => f.path));
+
+    }
+
+
+    function handleBatchCancel() {
+
+        batchCloseModal.visible = false;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reopen Last Closed Tab
+    |--------------------------------------------------------------------------
+    */
+
+    async function reopenLastClosedTab() {
+
+        const record = popClosedTab();
+
+        if (!record) {
+
+            notify.info("No recently closed tabs to reopen.");
+
+            return;
+
+        }
+
+        try {
+
+            const content = await window.craftale.filesystem.readFile(record.path);
+
+            openFile(
+                {
+                    name: record.name,
+                    path: record.path,
+                    content
+                },
+                { preview: false }
             );
 
+        } catch (err) {
+
+            console.error("[EDITOR] Failed to reopen tab:", err);
+
+            notify.warning(
+                `Could not reopen "${record.name}". The file may have been moved or deleted.`
+            );
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Overflow & Scrolling
+    |--------------------------------------------------------------------------
+    */
+
+    function updateScrollButtons() {
+
+        if (!tabsContainer) return;
+
+        canScrollLeft = tabsContainer.scrollLeft > 2;
+
+        canScrollRight =
+            tabsContainer.scrollLeft + tabsContainer.clientWidth <
+            tabsContainer.scrollWidth - 2;
+
+    }
+
+
+    function scrollTabs(direction: "left" | "right") {
+
+        if (!tabsContainer) return;
+
+        const offset = direction === "left" ? -180 : 180;
+
+        tabsContainer.scrollBy({ left: offset, behavior: "smooth" });
+
+        setTimeout(updateScrollButtons, 200);
+
+    }
+
+
+    function handleTabWheel(event: WheelEvent) {
+
+        if (!tabsContainer) return;
+
+        event.preventDefault();
+
+        tabsContainer.scrollLeft += event.deltaY || event.deltaX;
+
+        updateScrollButtons();
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Drag and Drop Reordering
+    |--------------------------------------------------------------------------
+    */
+
+    function handleTabDragStart(event: DragEvent, index: number) {
+
+        draggedTabIndex = index;
+
+        if (event.dataTransfer) {
+
+            event.dataTransfer.effectAllowed = "move";
+
+            event.dataTransfer.setData("application/craftale-tab-index", String(index));
+
+        }
+
+    }
+
+
+    function handleTabDragOver(event: DragEvent, index: number) {
+
+        event.preventDefault();
+
+        if (draggedTabIndex === null || draggedTabIndex === index) {
+
+            dragOverTabIndex = null;
+
+            dropPlacement = null;
+
             return;
 
         }
 
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Dirty File
-        |--------------------------------------------------------------------------
-        */
+        const midpoint = rect.left + rect.width / 2;
 
-        filePendingClose =
-            filePath;
+        dropPlacement = event.clientX < midpoint ? "before" : "after";
+
+        dragOverTabIndex = index;
+
+        if (event.dataTransfer) {
+
+            event.dataTransfer.dropEffect = "move";
+
+        }
+
+    }
 
 
-        showCloseModal =
-            true;
+    function handleTabDragLeave(event: DragEvent) {
+
+        const currentTarget = event.currentTarget as HTMLElement | null;
+
+        const relatedTarget = event.relatedTarget as HTMLElement | null;
+
+        if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) {
+
+            return;
+
+        }
+
+        dragOverTabIndex = null;
+
+        dropPlacement = null;
+
+    }
+
+
+    function handleTabDrop(event: DragEvent, index: number) {
+
+        event.preventDefault();
+
+        if (draggedTabIndex === null || draggedTabIndex === index) {
+
+            handleTabDragEnd();
+
+            return;
+
+        }
+
+        let targetIndex = index;
+
+        if (dropPlacement === "after" && draggedTabIndex < index) {
+
+            targetIndex = index;
+
+        } else if (dropPlacement === "after" && draggedTabIndex > index) {
+
+            targetIndex = index + 1;
+
+        } else if (dropPlacement === "before" && draggedTabIndex > index) {
+
+            targetIndex = index;
+
+        } else if (dropPlacement === "before" && draggedTabIndex < index) {
+
+            targetIndex = Math.max(0, index - 1);
+
+        }
+
+        reorderTabs(draggedTabIndex, targetIndex);
+
+        handleTabDragEnd();
+
+    }
+
+
+    function handleTabDragEnd() {
+
+        draggedTabIndex = null;
+
+        dragOverTabIndex = null;
+
+        dropPlacement = null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Context Menu Handlers
+    |--------------------------------------------------------------------------
+    */
+
+    function handleTabContextMenu(event: MouseEvent, file: OpenFile) {
+
+        event.preventDefault();
+
+        event.stopPropagation();
+
+        tabContextMenu = {
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            targetFile: file
+        };
+
+    }
+
+
+    function handleTabsBarContextMenu(event: MouseEvent) {
+
+        if ((event.target as HTMLElement).closest(".tab")) return;
+
+        event.preventDefault();
+
+        tabContextMenu = {
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            targetFile: $activeFile
+        };
 
     }
 
@@ -799,6 +1353,37 @@
 
             /*
             |--------------------------------------------------------------------------
+            | Ctrl + W Close Tab Command
+            |--------------------------------------------------------------------------
+            */
+
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd |
+                monaco.KeyCode.KeyW,
+                () => {
+                    closeActiveTab();
+                }
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Ctrl + Shift + T Reopen Closed Tab Command
+            |--------------------------------------------------------------------------
+            */
+
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd |
+                monaco.KeyMod.Shift |
+                monaco.KeyCode.KeyT,
+                () => {
+                    void reopenLastClosedTab();
+                }
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Content Changed
             |--------------------------------------------------------------------------
             */
@@ -952,7 +1537,7 @@
 
             /*
             |--------------------------------------------------------------------------
-            | Keyboard
+            | Keyboard & Resize Listeners
             |--------------------------------------------------------------------------
             */
 
@@ -960,6 +1545,13 @@
                 "keydown",
                 handleKeyDown
             );
+
+            window.addEventListener(
+                "resize",
+                updateScrollButtons
+            );
+
+            setTimeout(updateScrollButtons, 100);
 
         }
     );
@@ -977,6 +1569,11 @@
             window.removeEventListener(
                 "keydown",
                 handleKeyDown
+            );
+
+            window.removeEventListener(
+                "resize",
+                updateScrollButtons
             );
 
 
@@ -1006,6 +1603,28 @@
         }
     );
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tab Scroll & Auto-Scroll Active Tab
+    |--------------------------------------------------------------------------
+    */
+
+    $effect(() => {
+        const _ = $openedFiles;
+        setTimeout(updateScrollButtons, 50);
+    });
+
+    $effect(() => {
+        if ($activeFile && tabsContainer) {
+            setTimeout(() => {
+                const activeEl = tabsContainer?.querySelector<HTMLElement>(".tab.active");
+                activeEl?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+                updateScrollButtons();
+            }, 60);
+        }
+    });
+
 </script>
 
 
@@ -1020,104 +1639,242 @@
 
     <!--
     |--------------------------------------------------------------------------
-    | Tabs
+    | Tabs Bar
     |--------------------------------------------------------------------------
     -->
 
-    <div class="tabs">
+    <div class="tabs-bar">
 
-        {#each $openedFiles as file (
-            file.path
-        )}
+        {#if canScrollLeft}
 
-            <div
-                class="tab"
-                class:active={
-                    file.path ===
-                    $activeFile?.path
-                }
-                role="tab"
-                tabindex="0"
-                aria-selected={
-                    file.path ===
-                    $activeFile?.path
-                }
-                onclick={() =>
-                    activateFile(
-                        file.path
-                    )
-                }
-                onkeydown={(event) => {
-
-                    if (
-                        event.key ===
-                            "Enter" ||
-                        event.key ===
-                            " "
-                    ) {
-
-                        event.preventDefault();
-
-                        activateFile(
-                            file.path
-                        );
-
-                    }
-
-                }}
+            <button
+                type="button"
+                class="tab-scroll-btn left"
+                onclick={() => scrollTabs("left")}
+                title="Scroll Tabs Left"
+                aria-label="Scroll Tabs Left"
             >
+                ‹
+            </button>
 
-                <span class="file-icon">
-
-                    📄
-
-                </span>
+        {/if}
 
 
-                <span class="file-name">
+        <div
+            bind:this={tabsContainer}
+            class="tabs"
+            role="tablist"
+            tabindex="-1"
+            aria-label="Open editor tabs"
+            onscroll={updateScrollButtons}
+            onwheel={handleTabWheel}
+            oncontextmenu={handleTabsBarContextMenu}
+        >
 
-                    {file.name}
+            {#each $openedFiles as file, index (file.path)}
 
-                </span>
-
-
-                <button
-                    type="button"
-                    class="tab-close"
-                    class:is-dirty={file.isDirty}
+                <div
+                    class="tab"
+                    class:active={file.path === $activeFile?.path}
+                    class:is-pinned={file.isPinned}
+                    class:is-preview={file.isPreview}
+                    class:drag-over-before={dragOverTabIndex === index && dropPlacement === "before"}
+                    class:drag-over-after={dragOverTabIndex === index && dropPlacement === "after"}
+                    class:is-dragging={draggedTabIndex === index}
+                    role="tab"
+                    tabindex="0"
+                    aria-selected={file.path === $activeFile?.path}
+                    draggable="true"
                     title={
-                        file.isDirty
-                            ? "Unsaved changes (Click to close)"
-                            : "Close"
+                        file.isPinned
+                            ? `${file.name} (Pinned)`
+                            : file.isPreview
+                                ? `${file.name} (Preview)`
+                                : file.name
                     }
-                    aria-label={
-                        `Close ${file.name}`
-                    }
-                    onclick={(event) =>
-                        handleClose(
-                            event,
-                            file.path
-                        )
-                    }
+                    onclick={() => activateFile(file.path)}
+                    ondblclick={() => {
+                        if (file.isPreview) {
+                            promotePreviewTab(file.path);
+                        }
+                    }}
+                    onauxclick={(event) => {
+                        if (event.button === 1) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleCloseFile(file.path);
+                        }
+                    }}
+                    oncontextmenu={(event) => handleTabContextMenu(event, file)}
+                    ondragstart={(event) => handleTabDragStart(event, index)}
+                    ondragover={(event) => handleTabDragOver(event, index)}
+                    ondragleave={handleTabDragLeave}
+                    ondrop={(event) => handleTabDrop(event, index)}
+                    ondragend={handleTabDragEnd}
+                    onkeydown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            activateFile(file.path);
+                        }
+                    }}
                 >
 
-                    {#if file.isDirty}
+                    <!-- Pin Badge -->
 
-                        <span class="dirty-indicator">
-                            ●
+                    {#if file.isPinned}
+
+                        <span class="pin-icon" title="Pinned">
+                            📌
                         </span>
 
                     {/if}
 
-                    <span class="close-icon">
-                        ×
+
+                    <!-- File Icon -->
+
+                    <span class="file-icon">
+                        📄
                     </span>
 
+
+                    <!-- File Name -->
+
+                    <span class="file-name" class:preview-text={file.isPreview}>
+                        {file.name}
+                    </span>
+
+
+                    <!-- Close / Dirty Button -->
+
+                    <button
+                        type="button"
+                        class="tab-close"
+                        class:is-dirty={file.isDirty}
+                        class:is-pinned-close={file.isPinned}
+                        title={
+                            file.isDirty
+                                ? "Unsaved changes (Click to close)"
+                                : "Close"
+                        }
+                        aria-label={`Close ${file.name}`}
+                        onclick={(event) => handleClose(event, file.path)}
+                    >
+
+                        {#if file.isDirty}
+
+                            <span class="dirty-indicator">
+                                ●
+                            </span>
+
+                        {/if}
+
+                        <span class="close-icon">
+                            ×
+                        </span>
+
+                    </button>
+
+                </div>
+
+            {/each}
+
+        </div>
+
+
+        {#if canScrollRight}
+
+            <button
+                type="button"
+                class="tab-scroll-btn right"
+                onclick={() => scrollTabs("right")}
+                title="Scroll Tabs Right"
+                aria-label="Scroll Tabs Right"
+            >
+                ›
+            </button>
+
+        {/if}
+
+
+        <!-- More Tabs Dropdown Button -->
+
+        {#if $openedFiles.length > 0}
+
+            <div class="more-tabs-wrapper">
+
+                <button
+                    type="button"
+                    class="more-tabs-btn"
+                    class:active={showMoreTabsDropdown}
+                    onclick={() => (showMoreTabsDropdown = !showMoreTabsDropdown)}
+                    title="More Open Tabs"
+                    aria-label="More Open Tabs"
+                >
+                    ⌄
                 </button>
+
+                {#if showMoreTabsDropdown}
+
+                    <div
+                        class="more-tabs-backdrop"
+                        role="presentation"
+                        onclick={() => (showMoreTabsDropdown = false)}
+                    ></div>
+
+                    <div class="more-tabs-menu" role="menu">
+
+                        <div class="more-tabs-header">
+                            OPEN TABS ({$openedFiles.length})
+                        </div>
+
+                        <div class="more-tabs-list">
+
+                            {#each $openedFiles as f}
+
+                                <button
+                                    type="button"
+                                    class="more-tabs-item"
+                                    class:active={f.path === $activeFile?.path}
+                                    onclick={() => {
+                                        activateFile(f.path);
+                                        showMoreTabsDropdown = false;
+                                    }}
+                                >
+
+                                    <span class="more-tabs-icon">📄</span>
+
+                                    <span
+                                        class="more-tabs-title"
+                                        class:preview={f.isPreview}
+                                    >
+                                        {f.name}
+                                    </span>
+
+                                    {#if f.isPinned}
+
+                                        <span class="more-tabs-pin" title="Pinned">📌</span>
+
+                                    {/if}
+
+                                    {#if f.isDirty}
+
+                                        <span class="more-tabs-dirty" title="Unsaved">●</span>
+
+                                    {/if}
+
+                                </button>
+
+                            {/each}
+
+                        </div>
+
+                    </div>
+
+                {/if}
 
             </div>
 
-        {/each}
+        {/if}
 
     </div>
 
@@ -1139,59 +1896,61 @@
 
 <!--
 |--------------------------------------------------------------------------
-| Confirmation Modal
+| Single File Confirmation Modal
 |--------------------------------------------------------------------------
 -->
 
 <ConfirmModal
-
-    visible={
-        showCloseModal
-    }
-
+    visible={showCloseModal}
     title="Save Changes"
-
-    message={
-        "This file has unsaved changes. " +
-        "Do you want to save them before closing?"
-    }
-
-    fileName={
-
-        filePendingClose
-
-            ? (
-                $openedFiles.find(
-                    (file) =>
-                        pathsEqual(
-                            file.path,
-                            filePendingClose!
-                        )
-                )?.name ?? ""
-            )
-
-            : ""
-
-    }
-
+    message="This file has unsaved changes. Do you want to save them before closing?"
+    fileName={filePendingClose ? ($openedFiles.find(f => pathsEqual(f.path, filePendingClose!))?.name ?? "") : ""}
     confirmText="Save"
-
     secondaryText="Don't Save"
-
     cancelText="Cancel"
+    onConfirm={confirmCloseSave}
+    onSecondary={confirmCloseWithoutSave}
+    onCancel={cancelClose}
+/>
 
-    onConfirm={
-        confirmCloseSave
-    }
 
-    onSecondary={
-        confirmCloseWithoutSave
-    }
+<!--
+|--------------------------------------------------------------------------
+| Batch Close Confirmation Modal
+|--------------------------------------------------------------------------
+-->
 
-    onCancel={
-        cancelClose
-    }
+<BatchCloseModal
+    visible={batchCloseModal.visible}
+    files={batchCloseModal.dirtyFiles}
+    onSaveAll={handleBatchSaveAll}
+    onDiscardAll={handleBatchDiscardAll}
+    onCancel={handleBatchCancel}
+/>
 
+
+<!--
+|--------------------------------------------------------------------------
+| Tab Context Menu
+|--------------------------------------------------------------------------
+-->
+
+<TabContextMenu
+    visible={tabContextMenu.visible}
+    x={tabContextMenu.x}
+    y={tabContextMenu.y}
+    targetFile={tabContextMenu.targetFile}
+    canReopen={$recentlyClosedTabs.length > 0}
+    onClose={() => (tabContextMenu.visible = false)}
+    onCloseTab={(file) => handleCloseFile(file.path)}
+    onCloseOthers={handleCloseOthers}
+    onCloseToTheRight={handleCloseToTheRight}
+    onCloseSaved={handleCloseSaved}
+    onCloseAll={handleCloseAll}
+    onReopenClosed={reopenLastClosedTab}
+    onPinTab={(file) => pinTab(file.path)}
+    onUnpinTab={(file) => unpinTab(file.path)}
+    onKeepOpen={(file) => promotePreviewTab(file.path)}
 />
 
 
@@ -1221,11 +1980,11 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Tabs
+    | Tabs Bar
     |--------------------------------------------------------------------------
     */
 
-    .tabs {
+    .tabs-bar {
 
         height: 36px;
 
@@ -1235,22 +1994,105 @@
 
         align-items: stretch;
 
-        background:
-            #181818;
+        background: #181818;
 
-        border-bottom:
-            1px solid #333333;
+        border-bottom: 1px solid #333333;
+
+        position: relative;
+
+        overflow: hidden;
+
+    }
+
+
+    .tab-scroll-btn {
+
+        width: 24px;
+
+        height: 36px;
+
+        display: flex;
+
+        align-items: center;
+
+        justify-content: center;
+
+        background: #181818;
+
+        border: none;
+
+        color: #858585;
+
+        cursor: pointer;
+
+        font-size: 18px;
+
+        flex-shrink: 0;
+
+        z-index: 2;
+
+        transition: background 0.1s ease, color 0.1s ease;
+
+        user-select: none;
+
+    }
+
+
+    .tab-scroll-btn.left {
+
+        border-right: 1px solid #2d2d2d;
+
+    }
+
+
+    .tab-scroll-btn.right {
+
+        border-left: 1px solid #2d2d2d;
+
+    }
+
+
+    .tab-scroll-btn:hover {
+
+        background: #252526;
+
+        color: #ffffff;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tabs Container
+    |--------------------------------------------------------------------------
+    */
+
+    .tabs {
+
+        flex: 1;
+
+        height: 36px;
+
+        min-height: 36px;
+
+        display: flex;
+
+        align-items: stretch;
+
+        background: #181818;
 
         overflow-x: auto;
 
         overflow-y: hidden;
+
+        scrollbar-width: none;
 
     }
 
 
     .tabs::-webkit-scrollbar {
 
-        height: 4px;
+        display: none;
 
     }
 
@@ -1259,7 +2101,7 @@
 
         height: 36px;
 
-        min-width: 130px;
+        min-width: 120px;
 
         max-width: 220px;
 
@@ -1269,211 +2111,519 @@
 
         gap: 6px;
 
-        padding:
-            0 8px;
+        padding: 0 8px;
 
-        background:
-            #181818;
+        background: #181818;
 
-        border-right:
-            1px solid #2d2d2d;
+        border-right: 1px solid #2d2d2d;
 
-        color:
-            #858585;
+        color: #858585;
 
-        cursor:
-            pointer;
+        cursor: pointer;
 
-        user-select:
-            none;
+        user-select: none;
+
+        position: relative;
+
+        transition: background 0.1s ease;
+
+        outline: none;
 
     }
 
 
     .tab:hover {
 
-        background:
-            #202020;
+        background: #202020;
 
-        color:
-            #cccccc;
+        color: #cccccc;
 
     }
 
 
     .tab.active {
 
-        background:
-            #1e1e1e;
+        background: #1e1e1e;
 
-        color:
-            #ffffff;
+        color: #ffffff;
 
-        border-top:
-            1px solid #007acc;
+        border-top: 1px solid #007acc;
+
+    }
+
+
+    /* Drag and Drop Drop Indicators */
+
+    .tab.drag-over-before::before {
+
+        content: "";
+
+        position: absolute;
+
+        left: 0;
+
+        top: 0;
+
+        bottom: 0;
+
+        width: 2px;
+
+        background: #007acc;
+
+        z-index: 10;
+
+    }
+
+
+    .tab.drag-over-after::after {
+
+        content: "";
+
+        position: absolute;
+
+        right: 0;
+
+        top: 0;
+
+        bottom: 0;
+
+        width: 2px;
+
+        background: #007acc;
+
+        z-index: 10;
+
+    }
+
+
+    .tab.is-dragging {
+
+        opacity: 0.35;
+
+    }
+
+
+    /* Pinned Tab Styles */
+
+    .tab.is-pinned {
+
+        min-width: 80px;
+
+        max-width: 140px;
+
+        background: #1a1a1a;
+
+        border-right: 1px solid #303030;
+
+    }
+
+
+    .tab.is-pinned.active {
+
+        background: #1e1e1e;
+
+    }
+
+
+    .pin-icon {
+
+        font-size: 11px;
+
+        flex-shrink: 0;
+
+    }
+
+
+    .tab.is-pinned .tab-close {
+
+        display: none;
+
+    }
+
+
+    .tab.is-pinned:hover .tab-close {
+
+        display: flex;
+
+    }
+
+
+    /* Preview Tab Style */
+
+    .preview-text {
+
+        font-style: italic;
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | File Icon
+    | File Icon & File Name
     |--------------------------------------------------------------------------
     */
 
     .file-icon {
 
-        font-size:
-            12px;
+        font-size: 12px;
 
-        flex-shrink:
-            0;
+        flex-shrink: 0;
 
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | File Name
-    |--------------------------------------------------------------------------
-    */
 
     .file-name {
 
-        flex:
-            1;
+        flex: 1;
 
-        min-width:
-            0;
+        min-width: 0;
 
-        overflow:
-            hidden;
+        overflow: hidden;
 
-        text-overflow:
-            ellipsis;
+        text-overflow: ellipsis;
 
-        white-space:
-            nowrap;
+        white-space: nowrap;
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Tab Close Button & Dirty Indicator (VS Code Style)
+    | Tab Close Button & Dirty Indicator
     |--------------------------------------------------------------------------
     */
 
     .tab-close {
 
-        width:
-            20px;
+        width: 20px;
 
-        height:
-            20px;
+        height: 20px;
 
-        display:
-            flex;
+        display: flex;
 
-        align-items:
-            center;
+        align-items: center;
 
-        justify-content:
-            center;
+        justify-content: center;
 
-        border:
-            none;
+        border: none;
 
-        border-radius:
-            3px;
+        border-radius: 3px;
 
-        background:
-            transparent;
+        background: transparent;
 
-        color:
-            #858585;
+        color: #858585;
 
-        font-size:
-            14px;
+        font-size: 14px;
 
-        cursor:
-            pointer;
+        cursor: pointer;
 
-        padding:
-            0;
+        padding: 0;
 
-        margin-left:
-            4px;
+        margin-left: 4px;
 
-        flex-shrink:
-            0;
+        flex-shrink: 0;
 
-        position:
-            relative;
+        position: relative;
 
     }
 
 
     .tab-close:hover {
 
-        background:
-            #3a3a3a;
+        background: #3a3a3a;
 
-        color:
-            #ffffff;
+        color: #ffffff;
 
     }
 
 
     .dirty-indicator {
 
-        font-size:
-            10px;
+        font-size: 10px;
 
-        color:
-            #ffffff;
+        color: #ffffff;
 
-        display:
-            block;
+        display: block;
 
     }
 
 
     .close-icon {
 
-        font-size:
-            14px;
+        font-size: 14px;
 
-        line-height:
-            1;
+        line-height: 1;
 
-        display:
-            block;
+        display: block;
 
     }
 
 
-    /* When file is dirty: show dot by default; when hovering the tab, show × */
     .tab-close.is-dirty .close-icon {
 
-        display:
-            none;
+        display: none;
 
     }
 
 
     .tab:hover .tab-close.is-dirty .dirty-indicator {
 
-        display:
-            none;
+        display: none;
 
     }
 
 
     .tab:hover .tab-close.is-dirty .close-icon {
 
-        display:
-            block;
+        display: block;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | More Tabs Dropdown Button & Menu
+    |--------------------------------------------------------------------------
+    */
+
+    .more-tabs-wrapper {
+
+        position: relative;
+
+        display: flex;
+
+        align-items: center;
+
+        flex-shrink: 0;
+
+    }
+
+
+    .more-tabs-btn {
+
+        width: 28px;
+
+        height: 36px;
+
+        display: flex;
+
+        align-items: center;
+
+        justify-content: center;
+
+        background: #181818;
+
+        border: none;
+
+        border-left: 1px solid #2d2d2d;
+
+        color: #858585;
+
+        cursor: pointer;
+
+        font-size: 11px;
+
+        transition: background 0.1s ease, color 0.1s ease;
+
+    }
+
+
+    .more-tabs-btn:hover,
+    .more-tabs-btn.active {
+
+        background: #252526;
+
+        color: #ffffff;
+
+    }
+
+
+    .more-tabs-backdrop {
+
+        position: fixed;
+
+        inset: 0;
+
+        z-index: 99998;
+
+    }
+
+
+    .more-tabs-menu {
+
+        position: absolute;
+
+        top: 36px;
+
+        right: 0;
+
+        z-index: 99999;
+
+        width: 250px;
+
+        background: #252526;
+
+        border: 1px solid #454545;
+
+        border-radius: 4px;
+
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+        overflow: hidden;
+
+        display: flex;
+
+        flex-direction: column;
+
+        animation: modal-appear 0.1s ease-out;
+
+    }
+
+
+    .more-tabs-header {
+
+        padding: 7px 12px;
+
+        font-size: 11px;
+
+        font-weight: 600;
+
+        color: #888888;
+
+        border-bottom: 1px solid #333333;
+
+        letter-spacing: 0.5px;
+
+    }
+
+
+    .more-tabs-list {
+
+        overflow-y: auto;
+
+        max-height: 260px;
+
+    }
+
+
+    .more-tabs-list::-webkit-scrollbar {
+
+        width: 5px;
+
+    }
+
+
+    .more-tabs-list::-webkit-scrollbar-thumb {
+
+        background: #424242;
+
+        border-radius: 3px;
+
+    }
+
+
+    .more-tabs-item {
+
+        width: 100%;
+
+        height: 28px;
+
+        display: flex;
+
+        align-items: center;
+
+        gap: 8px;
+
+        padding: 0 12px;
+
+        background: transparent;
+
+        border: none;
+
+        color: #cccccc;
+
+        font-size: 12px;
+
+        cursor: pointer;
+
+        text-align: left;
+
+        outline: none;
+
+    }
+
+
+    .more-tabs-item:hover {
+
+        background: #094771;
+
+        color: #ffffff;
+
+    }
+
+
+    .more-tabs-item.active {
+
+        background: #1e1e1e;
+
+        color: #ffffff;
+
+        font-weight: 500;
+
+        border-left: 2px solid #007acc;
+
+    }
+
+
+    .more-tabs-icon {
+
+        font-size: 12px;
+
+        flex-shrink: 0;
+
+    }
+
+
+    .more-tabs-title {
+
+        flex: 1;
+
+        overflow: hidden;
+
+        text-overflow: ellipsis;
+
+        white-space: nowrap;
+
+    }
+
+
+    .more-tabs-title.preview {
+
+        font-style: italic;
+
+    }
+
+
+    .more-tabs-pin {
+
+        font-size: 10px;
+
+        margin-left: auto;
+
+        flex-shrink: 0;
+
+    }
+
+
+    .more-tabs-dirty {
+
+        color: #ffffff;
+
+        font-size: 10px;
+
+        margin-left: auto;
+
+        flex-shrink: 0;
 
     }
 
@@ -1486,14 +2636,11 @@
 
     .monaco-container {
 
-        flex:
-            1;
+        flex: 1;
 
-        min-height:
-            0;
+        min-height: 0;
 
-        width:
-            100%;
+        width: 100%;
 
     }
 
