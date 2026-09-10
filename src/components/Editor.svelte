@@ -25,6 +25,10 @@
         pathsEqual
     } from "../stores/workspace";
 
+    import {
+        notify
+    } from "../stores/notifications";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -364,6 +368,10 @@
             );
 
 
+        const fileName =
+            path.split(/[\\/]/).pop() || path;
+
+
         if (
             success
         ) {
@@ -373,12 +381,27 @@
                 path
             );
 
+            notify.success(`Saved "${fileName}"`);
+
         } else {
 
             console.error(
                 "[EDITOR] Save failed:",
                 path
             );
+
+            notify.error(`Failed to save "${fileName}"`, {
+                description: "Could not write file to disk. It may be locked, read-only, or deleted.",
+                actions: [
+                    {
+                        label: "Retry",
+                        primary: true,
+                        onClick: () => {
+                            void saveCurrentFile();
+                        }
+                    }
+                ]
+            });
 
         }
 

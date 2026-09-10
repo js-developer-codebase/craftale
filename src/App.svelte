@@ -16,6 +16,17 @@
     import Terminal
         from "./components/Terminal.svelte";
 
+    import NotificationContainer
+        from "./components/NotificationContainer.svelte";
+
+    import {
+        notify
+    } from "./stores/notifications";
+
+    import {
+        formatErrorMessage
+    } from "./utils/errors";
+
     import {
         workspacePath,
         isTerminalVisible,
@@ -60,12 +71,56 @@
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Global Error Handlers
+    |--------------------------------------------------------------------------
+    */
+
+    function handleWindowError(event: ErrorEvent) {
+
+        console.error("[GLOBAL ERROR]", event.error || event.message);
+
+        const formatted = formatErrorMessage(event.error || event.message);
+
+        notify.error(formatted.message, {
+            description: "An unexpected runtime error occurred.",
+            details: formatted.details
+        });
+
+    }
+
+
+    function handleUnhandledRejection(event: PromiseRejectionEvent) {
+
+        console.error("[UNHANDLED REJECTION]", event.reason);
+
+        const formatted = formatErrorMessage(event.reason);
+
+        notify.error(formatted.message, {
+            description: "An asynchronous operation failed.",
+            details: formatted.details
+        });
+
+    }
+
+
     onMount(() => {
 
         window.addEventListener(
             "keydown",
             handleGlobalKeyDown,
             true
+        );
+
+        window.addEventListener(
+            "error",
+            handleWindowError
+        );
+
+        window.addEventListener(
+            "unhandledrejection",
+            handleUnhandledRejection
         );
 
     });
@@ -77,6 +132,16 @@
             "keydown",
             handleGlobalKeyDown,
             true
+        );
+
+        window.removeEventListener(
+            "error",
+            handleWindowError
+        );
+
+        window.removeEventListener(
+            "unhandledrejection",
+            handleUnhandledRejection
         );
 
     });
@@ -139,6 +204,9 @@
         </section>
 
     </main>
+
+    <!-- Global Toast Notifications -->
+    <NotificationContainer />
 
 </div>
 

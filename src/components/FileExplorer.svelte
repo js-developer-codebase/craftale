@@ -20,6 +20,15 @@
         pathsEqual
     } from "../stores/workspace";
 
+    import {
+        notify
+    } from "../stores/notifications";
+
+    import {
+        validateFilename,
+        formatErrorMessage
+    } from "../utils/errors";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -138,6 +147,12 @@
 
             error = "Unable to load folder.";
 
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Failed to load folder: ${formatted.message}`, {
+                details: formatted.details
+            });
+
         } finally {
 
             loading = false;
@@ -160,6 +175,12 @@
         } catch (err) {
 
             console.error("Failed to refresh folder:", err);
+
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Failed to refresh explorer: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -185,6 +206,12 @@
         } catch (err) {
 
             console.error("Folder selection failed:", err);
+
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Folder selection failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -243,6 +270,20 @@
 
         creatingType = null;
 
+
+        /* Validate Name */
+
+        const validation = validateFilename(name);
+
+        if (!validation.valid) {
+
+            notify.warning(validation.error!);
+
+            return;
+
+        }
+
+
         try {
 
             if (type === "file") {
@@ -265,6 +306,8 @@
                     type: "file"
                 };
 
+                notify.success(`File "${res.name}" created`);
+
             } else {
 
                 const res = await window.craftale.filesystem.createFolder(parentPath, name);
@@ -277,13 +320,19 @@
                     type: "directory"
                 };
 
+                notify.success(`Folder "${res.name}" created`);
+
             }
 
         } catch (err: any) {
 
             console.error("Create failed:", err);
 
-            alert(err?.message || "Failed to create item.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Failed to create ${type}: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -353,6 +402,20 @@
 
         renamingPath = null;
 
+
+        /* Validate Name */
+
+        const validation = validateFilename(newName);
+
+        if (!validation.valid) {
+
+            notify.warning(validation.error!);
+
+            return;
+
+        }
+
+
         try {
 
             /* Save if open and dirty before rename */
@@ -382,11 +445,17 @@
 
             await refreshExplorer();
 
+            notify.success(`Renamed to "${res.newName}"`);
+
         } catch (err: any) {
 
             console.error("Rename failed:", err);
 
-            alert(err?.message || "Rename failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Rename failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -446,11 +515,17 @@
 
             await refreshExplorer();
 
+            notify.info(`Deleted "${target.name}"`);
+
         } catch (err: any) {
 
             console.error("Delete failed:", err);
 
-            alert(err?.message || "Delete failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Delete failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -534,7 +609,7 @@
 
             if (normDest === normSrc || normDest.startsWith(normSrc + "/")) {
 
-                alert("Cannot move or copy a directory into itself or a subfolder.");
+                notify.warning("Cannot move or copy a directory into itself or a subfolder.");
 
                 return;
 
@@ -564,6 +639,8 @@
 
                 }
 
+                notify.success(`Pasted "${clip.name}"`);
+
             } else {
 
                 const res = await window.craftale.filesystem.move(clip.path, destDir);
@@ -592,6 +669,8 @@
 
                 clearClipboard();
 
+                notify.success(`Moved "${clip.name}"`);
+
             }
 
             await refreshExplorer();
@@ -600,7 +679,11 @@
 
             console.error("Paste failed:", err);
 
-            alert(err?.message || "Paste operation failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Paste failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -621,15 +704,21 @@
 
         try {
 
-            await window.craftale.filesystem.duplicate(target.path);
+            const res = await window.craftale.filesystem.duplicate(target.path);
 
             await refreshExplorer();
+
+            notify.success(`Created duplicate "${res.name}"`);
 
         } catch (err: any) {
 
             console.error("Duplicate failed:", err);
 
-            alert(err?.message || "Duplicate failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Duplicate failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -663,6 +752,8 @@
                     keepBoth
                 });
 
+                notify.success(`Copied "${res.name}"`);
+
             } else {
 
                 res = await window.craftale.filesystem.move(srcPath, destDir, {
@@ -678,6 +769,8 @@
 
                 }
 
+                notify.success(`Moved "${res.name}"`);
+
             }
 
             await refreshExplorer();
@@ -686,7 +779,11 @@
 
             console.error("Conflict resolution failed:", err);
 
-            alert(err?.message || "Operation failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Operation failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
@@ -717,6 +814,8 @@
         const normDest = targetDir.replace(/\\/g, "/").toLowerCase();
 
         if (normDest === normSrc || normDest.startsWith(normSrc + "/")) {
+
+            notify.warning("Cannot move a folder into itself or a subfolder.");
 
             return;
 
@@ -749,11 +848,17 @@
 
             await refreshExplorer();
 
+            notify.success(`Moved "${res.name}"`);
+
         } catch (err: any) {
 
             console.error("Drop move failed:", err);
 
-            alert(err?.message || "Move failed.");
+            const formatted = formatErrorMessage(err);
+
+            notify.error(`Move failed: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 

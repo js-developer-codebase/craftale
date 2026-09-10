@@ -15,6 +15,14 @@
         isTerminalVisible
     } from "../stores/workspace";
 
+    import {
+        notify
+    } from "../stores/notifications";
+
+    import {
+        formatErrorMessage
+    } from "../utils/errors";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -353,6 +361,12 @@
             sessions = [...sessions];
 
             xterm.write(`\r\n\x1b[31mFailed to start terminal: ${error}\x1b[0m\r\n`);
+
+            const formatted = formatErrorMessage(error);
+
+            notify.error(`Failed to start terminal: ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 

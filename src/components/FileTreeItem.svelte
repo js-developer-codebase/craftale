@@ -2,6 +2,8 @@
 
     import { onMount } from "svelte";
     import { openFile, pathsEqual } from "../stores/workspace";
+    import { notify } from "../stores/notifications";
+    import { formatErrorMessage } from "../utils/errors";
     import FileTreeItem from "./FileTreeItem.svelte";
 
     export type FileItem = {
@@ -209,6 +211,12 @@
 
             console.error("[RENDERER] Directory error:", error);
 
+            const formatted = formatErrorMessage(error);
+
+            notify.error(`Failed to read folder "${item.name}": ${formatted.message}`, {
+                details: formatted.details
+            });
+
         } finally {
 
             loading = false;
@@ -277,6 +285,12 @@
         } catch (error) {
 
             console.error("[RENDERER] Failed to open file:", error);
+
+            const formatted = formatErrorMessage(error);
+
+            notify.error(`Failed to open file "${item.name}": ${formatted.message}`, {
+                details: formatted.details
+            });
 
         }
 
