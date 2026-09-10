@@ -22,6 +22,7 @@ const watcherManager =
     require("./ipc/watcher.cjs");
 
 require("./ipc/fileSystem.cjs");
+require("./ipc/search.cjs");
 
 
 /*

@@ -290,21 +290,63 @@ export interface JumpRequest {
     path?: string;
     line: number;
     column?: number;
+    length?: number;
     preview?: boolean;
     timestamp: number;
 }
 
 export const jumpRequest = writable<JumpRequest | null>(null);
 
-export function requestJump(line: number, column = 1, path?: string, preview = false) {
+export function requestJump(
+    line: number,
+    column = 1,
+    path?: string,
+    preview = false,
+    length?: number
+) {
 
     jumpRequest.set({
         path,
         line,
         column,
+        length,
         preview,
         timestamp: Date.now()
     });
 
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| Sidebar View State (Activity Bar)
+|--------------------------------------------------------------------------
+*/
+
+export type SidebarView = "explorer" | "search";
+
+export const activeSidebarView = writable<SidebarView>("explorer");
+export const isSidebarVisible = writable<boolean>(true);
+
+export function toggleSidebarView(view: SidebarView) {
+
+    const current = get(activeSidebarView);
+    const visible = get(isSidebarVisible);
+
+    if (current === view && visible) {
+        isSidebarVisible.set(false);
+    } else {
+        activeSidebarView.set(view);
+        isSidebarVisible.set(true);
+    }
+
+}
+
+export function openSidebarView(view: SidebarView) {
+
+    activeSidebarView.set(view);
+    isSidebarVisible.set(true);
+
+}
+
 

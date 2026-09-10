@@ -306,6 +306,88 @@ declare global {
 
             };
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | SEARCH & REPLACE
+            |--------------------------------------------------------------------------
+            */
+
+            search: {
+
+                searchWorkspace(
+                    workspacePath: string,
+                    options?: {
+                        query: string;
+                        isRegex?: boolean;
+                        isCaseSensitive?: boolean;
+                        matchWholeWord?: boolean;
+                        includePattern?: string;
+                        excludePattern?: string;
+                        maxResults?: number;
+                    }
+                ): Promise<{
+                    results: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        matches: Array<{
+                            lineNumber: number;
+                            column: number;
+                            length: number;
+                            lineText: string;
+                            preview: {
+                                before: string;
+                                match: string;
+                                after: string;
+                            };
+                        }>;
+                    }>;
+                    totalMatches: number;
+                    totalFiles: number;
+                    durationMs: number;
+                    truncated: boolean;
+                    error?: string;
+                }>;
+
+                replaceInFile(
+                    filePath: string,
+                    options: {
+                        query: string;
+                        replacement: string;
+                        isRegex?: boolean;
+                        isCaseSensitive?: boolean;
+                        matchWholeWord?: boolean;
+                        lineNumber?: number | null;
+                        column?: number | null;
+                    }
+                ): Promise<{
+                    success: boolean;
+                    filePath?: string;
+                    newContent?: string;
+                    error?: string;
+                }>;
+
+                replaceWorkspace(
+                    workspacePath: string,
+                    options: {
+                        query: string;
+                        replacement: string;
+                        isRegex?: boolean;
+                        isCaseSensitive?: boolean;
+                        matchWholeWord?: boolean;
+                        filePaths: string[];
+                    }
+                ): Promise<{
+                    success: boolean;
+                    totalModifiedFiles: number;
+                    totalReplacements: number;
+                    modifiedFiles?: Array<{ filePath: string; newContent: string }>;
+                    error?: string;
+                }>;
+
+            };
+
         };
 
     };

@@ -32,8 +32,17 @@
         recordFileAccess,
         openQuickOpen,
         jumpRequest,
+        openSidebarView,
         type LocationEntry
     } from "../stores/navigation";
+
+    import {
+        searchQuery,
+        isReplaceOpen,
+        navigateNextMatch,
+        navigatePrevMatch,
+        runWorkspaceSearch
+    } from "../stores/search";
 
     import {
         parseDocumentSymbols,
@@ -754,7 +763,67 @@
 
         }
 
+
+        /* Ctrl + F Find in Current File */
+
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f") {
+
+            if (editor) {
+
+                event.preventDefault();
+
+                editor.focus();
+
+                editor.getAction("actions.find")?.run();
+
+                return;
+
+            }
+
+        }
+
+
+        /* Ctrl + H Replace in Current File */
+
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "h") {
+
+            if (editor) {
+
+                event.preventDefault();
+
+                editor.focus();
+
+                editor.getAction("editor.action.startFindReplaceAction")?.run();
+
+                return;
+
+            }
+
+        }
+
+
+        /* F4 / Shift + F4 Next / Previous Search Match */
+
+        if (event.key === "F4") {
+
+            event.preventDefault();
+
+            if (event.shiftKey) {
+
+                navigatePrevMatch();
+
+            } else {
+
+                navigateNextMatch();
+
+            }
+
+            return;
+
+        }
+
     }
+
 
 
     /*
@@ -1429,7 +1498,7 @@
         }
     }
 
-    async function jumpToLocation(location: { path: string; line: number; column?: number }) {
+    async function jumpToLocation(location: { path: string; line: number; column?: number; length?: number }) {
         if (!location.path) return;
 
         let targetPath = location.path;
@@ -1472,7 +1541,16 @@
             if (!editor) return;
             const col = location.column || 1;
             editor.revealPositionInCenter(new monaco.Position(location.line, col));
-            editor.setPosition({ lineNumber: location.line, column: col });
+            if (location.length && location.length > 0) {
+                editor.setSelection(new monaco.Selection(
+                    location.line,
+                    col,
+                    location.line,
+                    col + location.length
+                ));
+            } else {
+                editor.setPosition({ lineNumber: location.line, column: col });
+            }
             editor.focus();
         }, 60);
     }
@@ -1784,6 +1862,55 @@
                 }
             );
 
+            /* Search Workspace: Ctrl + Shift + F */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+                () => {
+                    const sel = editor?.getSelection();
+                    if (sel && !sel.isEmpty()) {
+                        const text = editor.getModel()?.getValueInRange(sel);
+                        if (text && text.trim()) {
+                            searchQuery.set(text.trim());
+                        }
+                    }
+                    openSidebarView("search");
+                    void runWorkspaceSearch();
+                }
+            );
+
+            /* Replace in Workspace: Ctrl + Shift + H */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyH,
+                () => {
+                    const sel = editor?.getSelection();
+                    if (sel && !sel.isEmpty()) {
+                        const text = editor.getModel()?.getValueInRange(sel);
+                        if (text && text.trim()) {
+                            searchQuery.set(text.trim());
+                        }
+                    }
+                    isReplaceOpen.set(true);
+                    openSidebarView("search");
+                    void runWorkspaceSearch();
+                }
+            );
+
+            /* Next Search Match: F4 */
+            editor.addCommand(
+                monaco.KeyCode.F4,
+                () => {
+                    navigateNextMatch();
+                }
+            );
+
+            /* Previous Search Match: Shift + F4 */
+            editor.addCommand(
+                monaco.KeyMod.Shift | monaco.KeyCode.F4,
+                () => {
+                    navigatePrevMatch();
+                }
+            );
+
             /* Register Monaco Opener for Cross-File Navigation */
             openerDisposable = monaco.editor.registerEditorOpener({
                 openCodeEditor(_sourceEditor, resource, selectionOrPosition) {
@@ -1803,16 +1930,18 @@
                 currentEnclosingSymbol.set(enclosing);
             });
 
-            /* Listen for Jump Requests from Breadcrumbs, Outline, Quick Open */
+            /* Listen for Jump Requests from Breadcrumbs, Outline, Quick Open, Search */
             jumpRequestUnsubscribe = jumpRequest.subscribe((req) => {
                 if (req) {
                     void jumpToLocation({
                         path: req.path || $activeFile?.path || "",
                         line: req.line,
-                        column: req.column || 1
+                        column: req.column || 1,
+                        length: req.length
                     });
                 }
             });
+
 
 
             /*

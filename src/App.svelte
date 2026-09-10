@@ -8,6 +8,11 @@
     import FileExplorer
         from "./components/FileExplorer.svelte";
 
+    import WorkspaceSearch
+        from "./components/WorkspaceSearch.svelte";
+
+    import ActivityBar
+        from "./components/ActivityBar.svelte";
 
     import Editor
         from "./components/Editor.svelte";
@@ -48,8 +53,20 @@
         openFileSwitcher,
         cycleFileSwitcher,
         fileSwitcherState,
-        mruFiles
+        mruFiles,
+        activeSidebarView,
+        isSidebarVisible,
+        openSidebarView,
+        toggleSidebarView
     } from "./stores/navigation";
+
+    import {
+        searchQuery,
+        isReplaceOpen,
+        runWorkspaceSearch,
+        navigateNextMatch,
+        navigatePrevMatch
+    } from "./stores/search";
 
     import { get } from "svelte/store";
 
@@ -170,7 +187,78 @@
 
         }
 
+        /* Search Workspace: Ctrl + Shift + F */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "f"
+        ) {
+
+            event.preventDefault();
+
+            openSidebarView("search");
+
+            void runWorkspaceSearch();
+
+            return;
+
+        }
+
+        /* Replace in Workspace: Ctrl + Shift + H */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "h"
+        ) {
+
+            event.preventDefault();
+
+            isReplaceOpen.set(true);
+
+            openSidebarView("search");
+
+            void runWorkspaceSearch();
+
+            return;
+
+        }
+
+        /* Explorer: Ctrl + Shift + E */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "e"
+        ) {
+
+            event.preventDefault();
+
+            openSidebarView("explorer");
+
+            return;
+
+        }
+
+        /* Next/Prev Search Match: F4 / Shift + F4 */
+        if (event.key === "F4") {
+
+            event.preventDefault();
+
+            if (event.shiftKey) {
+
+                navigatePrevMatch();
+
+            } else {
+
+                navigateNextMatch();
+
+            }
+
+            return;
+
+        }
+
     }
+
 
 
     /*
@@ -256,15 +344,30 @@
 
     <!--
     |--------------------------------------------------------------------------
-    | Sidebar
+    | Activity Bar
     |--------------------------------------------------------------------------
     -->
 
-    <aside class="sidebar">
+    <ActivityBar />
 
-        <FileExplorer />
 
-    </aside>
+    <!--
+    |--------------------------------------------------------------------------
+    | Sidebar (Collapsible)
+    |--------------------------------------------------------------------------
+    -->
+
+    {#if $isSidebarVisible}
+        <aside class="sidebar">
+
+            {#if $activeSidebarView === "explorer"}
+                <FileExplorer />
+            {:else if $activeSidebarView === "search"}
+                <WorkspaceSearch />
+            {/if}
+
+        </aside>
+    {/if}
 
 
     <!--

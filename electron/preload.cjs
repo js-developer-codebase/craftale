@@ -566,6 +566,47 @@ contextBridge.exposeInMainWorld(
 
             }
 
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SEARCH & REPLACE
+        |--------------------------------------------------------------------------
+        */
+
+        search: {
+
+            searchWorkspace: (workspacePath, options) => {
+
+                return ipcRenderer.invoke(
+                    "search:workspace",
+                    workspacePath,
+                    options
+                );
+
+            },
+
+            replaceInFile: (filePath, options) => {
+
+                return ipcRenderer.invoke(
+                    "search:replace-in-file",
+                    filePath,
+                    options
+                );
+
+            },
+
+            replaceWorkspace: (workspacePath, options) => {
+
+                return ipcRenderer.invoke(
+                    "search:replace-workspace",
+                    workspacePath,
+                    options
+                );
+
+            }
+
         }
 
     }
