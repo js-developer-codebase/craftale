@@ -146,6 +146,16 @@ declare global {
                     name: string;
                 }>;
 
+
+                listFiles(
+                    directoryPath: string
+                ): Promise<{
+                    name: string;
+                    path: string;
+                    relativePath: string;
+                    extension: string;
+                }[]>;
+
             };
 
 

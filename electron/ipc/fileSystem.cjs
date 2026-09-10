@@ -983,6 +983,96 @@ ipcMain.handle(
 
         }
 
+/*
+|--------------------------------------------------------------------------
+| List Files (Recursive for Quick Open / Go To File)
+|--------------------------------------------------------------------------
+*/
+
+const IGNORED_DIRS = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    ".svelte-kit",
+    "release",
+    "out",
+    ".idea",
+    ".vscode",
+    "build",
+    ".next",
+    ".turbo",
+    ".cache"
+]);
+
+async function scanFilesRecursively(dir, rootDir, results, maxFiles = 10000) {
+
+    if (results.length >= maxFiles) return;
+
+    try {
+
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+
+            if (results.length >= maxFiles) break;
+
+            const fullPath = path.join(dir, entry.name);
+
+            if (entry.isDirectory()) {
+
+                if (!IGNORED_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
+
+                    await scanFilesRecursively(fullPath, rootDir, results, maxFiles);
+
+                }
+
+            } else if (entry.isFile()) {
+
+                const rel = path.relative(rootDir, fullPath).replace(/\\/g, "/");
+
+                results.push({
+                    name: entry.name,
+                    path: fullPath,
+                    relativePath: rel,
+                    extension: path.extname(entry.name).toLowerCase().replace(/^\./, "")
+                });
+
+            }
+
+        }
+
+    } catch (err) {
+
+        console.warn("[FS] scanFilesRecursively error at", dir, err.message);
+
+    }
+
+}
+
+ipcMain.handle(
+    "filesystem:list-files",
+    async (event, directoryPath) => {
+
+        console.log("[IPC] list-files:", directoryPath);
+
+        try {
+
+            const results = [];
+
+            if (!directoryPath) return results;
+
+            await scanFilesRecursively(directoryPath, directoryPath, results);
+
+            return results;
+
+        } catch (error) {
+
+            console.error("[FS] list-files failed:", error);
+
+            throw error;
+
+        }
+
     }
 );
 

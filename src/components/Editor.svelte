@@ -5,6 +5,8 @@
         onDestroy
     } from "svelte";
 
+    import { get } from "svelte/store";
+
 
     import * as monaco
         from "monaco-editor";
@@ -18,6 +20,26 @@
 
     import BatchCloseModal
         from "./BatchCloseModal.svelte";
+
+    import Breadcrumbs from "./Breadcrumbs.svelte";
+
+    import {
+        activeDocumentSymbols,
+        currentEnclosingSymbol,
+        recordNavigationPoint,
+        stepBack,
+        stepForward,
+        recordFileAccess,
+        openQuickOpen,
+        jumpRequest,
+        type LocationEntry
+    } from "../stores/navigation";
+
+    import {
+        parseDocumentSymbols,
+        findEnclosingSymbol,
+        type DocumentSymbolItem
+    } from "../utils/symbols";
 
     import {
         openedFiles,
@@ -371,6 +393,18 @@
         switchingModel =
             false;
 
+        recordFileAccess(file.path);
+
+        const syms = parseDocumentSymbols(file.content, file.name);
+        activeDocumentSymbols.set(syms);
+
+        const pos = editor.getPosition();
+        if (pos) {
+            currentEnclosingSymbol.set(findEnclosingSymbol(syms, pos.lineNumber));
+        } else {
+            currentEnclosingSymbol.set(null);
+        }
+
     }
 
 
@@ -599,6 +633,122 @@
             event.preventDefault();
 
             void reopenLastClosedTab();
+
+            return;
+
+        }
+
+
+        /* Ctrl + P Quick Open File */
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === "p"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("file");
+
+            return;
+
+        }
+
+
+        /* Ctrl + G Go to Line */
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === "g"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("line");
+
+            return;
+
+        }
+
+
+        /* Ctrl + Shift + O Go to Symbol */
+
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "o"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("symbol");
+
+            return;
+
+        }
+
+
+        /* Alt + LeftArrow Navigate Back */
+
+        if (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "ArrowLeft") {
+
+            event.preventDefault();
+
+            handleNavigateBack();
+
+            return;
+
+        }
+
+
+        /* Alt + RightArrow Navigate Forward */
+
+        if (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "ArrowRight") {
+
+            event.preventDefault();
+
+            handleNavigateForward();
+
+            return;
+
+        }
+
+
+        /* F12 Go to Definition */
+
+        if (event.key === "F12" && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+
+            event.preventDefault();
+
+            void handleGoToDefinition();
+
+            return;
+
+        }
+
+
+        /* Ctrl + F12 Go to Implementation */
+
+        if (event.key === "F12" && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+
+            event.preventDefault();
+
+            void handleGoToImplementation();
+
+            return;
+
+        }
+
+
+        /* Shift + F12 Find References */
+
+        if (event.key === "F12" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+
+            event.preventDefault();
+
+            void handleFindReferences();
 
             return;
 
@@ -1243,6 +1393,158 @@
 
     /*
     |--------------------------------------------------------------------------
+    | Code Navigation & Location Jumps
+    |--------------------------------------------------------------------------
+    */
+
+    let cursorDisposable: monaco.IDisposable | undefined;
+    let openerDisposable: monaco.IDisposable | undefined;
+    let jumpRequestUnsubscribe: (() => void) | undefined;
+
+    function recordCurrentLocation() {
+        if (!$activeFile || !editor) return;
+        const pos = editor.getPosition();
+        if (pos) {
+            recordNavigationPoint({
+                path: $activeFile.path,
+                line: pos.lineNumber,
+                column: pos.column
+            });
+        }
+    }
+
+    function handleNavigateBack() {
+        recordCurrentLocation();
+        const target = stepBack();
+        if (target) {
+            void jumpToLocation(target);
+        }
+    }
+
+    function handleNavigateForward() {
+        recordCurrentLocation();
+        const target = stepForward();
+        if (target) {
+            void jumpToLocation(target);
+        }
+    }
+
+    async function jumpToLocation(location: { path: string; line: number; column?: number }) {
+        if (!location.path) return;
+
+        if (!$activeFile || !pathsEqual($activeFile.path, location.path)) {
+            const existing = $openedFiles.find(f => pathsEqual(f.path, location.path));
+            if (existing) {
+                activateFile(existing.path);
+            } else {
+                try {
+                    const content = await window.craftale.filesystem.readFile(location.path);
+                    const name = location.path.split(/[\\/]/).pop() || location.path;
+                    openFile({ name, path: location.path, content }, { preview: false });
+                } catch (err) {
+                    console.error("[EDITOR] Failed to open file for navigation:", err);
+                    return;
+                }
+            }
+        }
+
+        setTimeout(() => {
+            if (!editor) return;
+            const col = location.column || 1;
+            editor.revealPositionInCenter(new monaco.Position(location.line, col));
+            editor.setPosition({ lineNumber: location.line, column: col });
+            editor.focus();
+        }, 60);
+    }
+
+    function jumpToSymbol(symbol: DocumentSymbolItem) {
+        recordCurrentLocation();
+        if (editor) {
+            editor.revealPositionInCenter(new monaco.Position(symbol.line, symbol.column));
+            editor.setPosition({ lineNumber: symbol.line, column: symbol.column });
+            editor.focus();
+        }
+    }
+
+    function jumpToLine(line: number, column = 1, preview = false) {
+        if (!editor) return;
+        if (!preview) {
+            recordCurrentLocation();
+        }
+        editor.revealPositionInCenter(new monaco.Position(line, column));
+        editor.setPosition({ lineNumber: line, column });
+        if (!preview) {
+            editor.focus();
+        }
+    }
+
+    async function openFileFromOpener(targetPath: string, line: number, column = 1) {
+        recordCurrentLocation();
+        await jumpToLocation({ path: targetPath, line, column });
+    }
+
+    async function handleGoToDefinition() {
+        recordCurrentLocation();
+        const action = editor?.getAction("editor.action.revealDefinition");
+        if (action) {
+            await action.run();
+        }
+        await handleImportPathFallback();
+    }
+
+    async function handleGoToImplementation() {
+        recordCurrentLocation();
+        const action = editor?.getAction("editor.action.goToImplementation");
+        if (action) {
+            await action.run();
+        }
+    }
+
+    async function handleFindReferences() {
+        const action = editor?.getAction("editor.action.referenceSearch.trigger");
+        if (action) {
+            await action.run();
+        }
+    }
+
+    async function handleImportPathFallback() {
+        if (!editor || !$activeFile) return;
+        const pos = editor.getPosition();
+        if (!pos) return;
+        const model = editor.getModel();
+        if (!model) return;
+        const lineContent = model.getLineContent(pos.lineNumber);
+        const importMatch = lineContent.match(/(?:import|require|from)\s*\(?['"]([^'"]+)['"]\)?/);
+        if (importMatch) {
+            const relPath = importMatch[1];
+            if (relPath.startsWith("./") || relPath.startsWith("../")) {
+                const currentDir = $activeFile.path.replace(/[\\/][^\\/]+$/, "");
+                const candidates = [
+                    `${currentDir}/${relPath}`,
+                    `${currentDir}/${relPath}.ts`,
+                    `${currentDir}/${relPath}.js`,
+                    `${currentDir}/${relPath}.svelte`,
+                    `${currentDir}/${relPath}/index.ts`,
+                    `${currentDir}/${relPath}/index.js`
+                ];
+                for (const cand of candidates) {
+                    try {
+                        const cleanPath = cand.replace(/\\/g, "/");
+                        const content = await window.craftale.filesystem.readFile(cleanPath);
+                        const name = cleanPath.split("/").pop() || cleanPath;
+                        openFile({ name, path: cleanPath, content }, { preview: false });
+                        break;
+                    } catch {
+                        // try next candidate
+                    }
+                }
+            }
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
     | Content Disposable
     |--------------------------------------------------------------------------
     */
@@ -1384,6 +1686,116 @@
 
             /*
             |--------------------------------------------------------------------------
+            | Quick Open & Code Navigation Commands
+            |--------------------------------------------------------------------------
+            */
+
+            /* Quick Open File: Ctrl + P */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP,
+                () => {
+                    openQuickOpen("file");
+                }
+            );
+
+            /* Go to Line: Ctrl + G */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG,
+                () => {
+                    openQuickOpen("line");
+                }
+            );
+
+            /* Go to Symbol: Ctrl + Shift + O */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO,
+                () => {
+                    openQuickOpen("symbol");
+                }
+            );
+
+            /* Go to Definition: F12 */
+            editor.addCommand(
+                monaco.KeyCode.F12,
+                () => {
+                    void handleGoToDefinition();
+                }
+            );
+
+            /* Go to Implementation: Ctrl + F12 */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.F12,
+                () => {
+                    void handleGoToImplementation();
+                }
+            );
+
+            /* Find References: Shift + F12 */
+            editor.addCommand(
+                monaco.KeyMod.Shift | monaco.KeyCode.F12,
+                () => {
+                    void handleFindReferences();
+                }
+            );
+
+            /* Peek Definition: Alt + F12 */
+            editor.addCommand(
+                monaco.KeyMod.Alt | monaco.KeyCode.F12,
+                () => {
+                    recordCurrentLocation();
+                    void editor?.getAction("editor.action.peekDefinition")?.run();
+                }
+            );
+
+            /* Navigate Back: Alt + LeftArrow */
+            editor.addCommand(
+                monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow,
+                () => {
+                    handleNavigateBack();
+                }
+            );
+
+            /* Navigate Forward: Alt + RightArrow */
+            editor.addCommand(
+                monaco.KeyMod.Alt | monaco.KeyCode.RightArrow,
+                () => {
+                    handleNavigateForward();
+                }
+            );
+
+            /* Register Monaco Opener for Cross-File Navigation */
+            openerDisposable = monaco.editor.registerEditorOpener({
+                openCodeEditor(_sourceEditor, resource, selectionOrPosition) {
+                    const targetPath = resource.fsPath || resource.path;
+                    const targetLine = (selectionOrPosition as any)?.startLineNumber || (selectionOrPosition as any)?.lineNumber || 1;
+                    const targetCol = (selectionOrPosition as any)?.startColumn || (selectionOrPosition as any)?.column || 1;
+                    void openFileFromOpener(targetPath, targetLine, targetCol);
+                    return true;
+                }
+            });
+
+            /* Track Cursor Position for Symbol and Location Tracking */
+            cursorDisposable = editor.onDidChangeCursorPosition((e) => {
+                const line = e.position.lineNumber;
+                const symbols = get(activeDocumentSymbols);
+                const enclosing = findEnclosingSymbol(symbols, line);
+                currentEnclosingSymbol.set(enclosing);
+            });
+
+            /* Listen for Jump Requests from Breadcrumbs, Outline, Quick Open */
+            jumpRequestUnsubscribe = jumpRequest.subscribe((req) => {
+                if (req) {
+                    void jumpToLocation({
+                        path: req.path || $activeFile?.path || "",
+                        line: req.line,
+                        column: req.column || 1
+                    });
+                }
+            });
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Content Changed
             |--------------------------------------------------------------------------
             */
@@ -1433,6 +1845,13 @@
                             path,
                             content
                         );
+
+                        const syms = parseDocumentSymbols(content, $activeFile?.name || path);
+                        activeDocumentSymbols.set(syms);
+                        const pos = editor.getPosition();
+                        if (pos) {
+                            currentEnclosingSymbol.set(findEnclosingSymbol(syms, pos.lineNumber));
+                        }
 
                     }
                 );
@@ -1578,6 +1997,12 @@
 
 
             contentDisposable?.dispose();
+
+            cursorDisposable?.dispose();
+
+            openerDisposable?.dispose();
+
+            jumpRequestUnsubscribe?.();
 
 
             activeFileUnsubscribe?.();
@@ -1877,6 +2302,18 @@
         {/if}
 
     </div>
+
+
+    <!--
+    |--------------------------------------------------------------------------
+    | Breadcrumbs Navigation Bar
+    |--------------------------------------------------------------------------
+    -->
+
+    <Breadcrumbs
+        onJumpToSymbol={jumpToSymbol}
+        onNavigateLocation={jumpToLocation}
+    />
 
 
     <!--

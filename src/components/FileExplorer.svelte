@@ -5,6 +5,7 @@
     import ContextMenu from "./ContextMenu.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
     import ConflictModal from "./ConflictModal.svelte";
+    import SymbolOutline from "./SymbolOutline.svelte";
     import {
         setWorkspace,
         openedFiles,
@@ -1345,6 +1346,9 @@
             {/if}
 
         </div>
+
+        <!-- Symbol Outline Panel -->
+        <SymbolOutline />
 
     {:else}
 

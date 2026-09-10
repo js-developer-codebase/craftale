@@ -261,6 +261,24 @@ contextBridge.exposeInMainWorld(
                     srcPath
                 );
 
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | List Files (Recursive for Quick Open / Go To File)
+            |--------------------------------------------------------------------------
+            */
+
+            listFiles: (
+                directoryPath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:list-files",
+                    directoryPath
+                );
+
             }
 
         },

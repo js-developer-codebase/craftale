@@ -22,6 +22,12 @@
     import ExternalChangeModal
         from "./components/ExternalChangeModal.svelte";
 
+    import QuickOpen
+        from "./components/QuickOpen.svelte";
+
+    import FileHistorySwitcher
+        from "./components/FileHistorySwitcher.svelte";
+
     import {
         notify
     } from "./stores/notifications";
@@ -33,8 +39,19 @@
     import {
         workspacePath,
         isTerminalVisible,
-        toggleTerminal
+        toggleTerminal,
+        openedFiles
     } from "./stores/workspace";
+
+    import {
+        openQuickOpen,
+        openFileSwitcher,
+        cycleFileSwitcher,
+        fileSwitcherState,
+        mruFiles
+    } from "./stores/navigation";
+
+    import { get } from "svelte/store";
 
 
     /*
@@ -48,12 +65,13 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Global Keydown: Ctrl + ` (Toggle Terminal)
+    | Global Keydown (Ctrl+`, Ctrl+P, Ctrl+G, Ctrl+Shift+O, Ctrl+Tab)
     |--------------------------------------------------------------------------
     */
 
     function handleGlobalKeyDown(event: KeyboardEvent) {
 
+        /* Toggle Terminal: Ctrl + ` */
         if (
             (event.ctrlKey || event.metaKey) &&
             (
@@ -68,6 +86,87 @@
             event.stopPropagation();
 
             toggleTerminal();
+
+            return;
+
+        }
+
+        /* Quick Open File: Ctrl + P */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === "p"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("file");
+
+            return;
+
+        }
+
+        /* Go to Line: Ctrl + G */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === "g"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("line");
+
+            return;
+
+        }
+
+        /* Go to Symbol: Ctrl + Shift + O */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "o"
+        ) {
+
+            event.preventDefault();
+
+            openQuickOpen("symbol");
+
+            return;
+
+        }
+
+        /* File History Switcher: Ctrl + Tab */
+        if ((event.ctrlKey || event.metaKey) && event.key === "Tab") {
+
+            event.preventDefault();
+
+            const isAlreadyOpen = get(fileSwitcherState).visible;
+
+            if (isAlreadyOpen) {
+
+                cycleFileSwitcher(event.shiftKey ? -1 : 1);
+
+            } else {
+
+                const allOpen = get(openedFiles);
+
+                if (allOpen.length > 1) {
+
+                    const openPaths = new Set(allOpen.map((f) => f.path.toLowerCase()));
+
+                    const ordered = [
+                        ...get(mruFiles).filter((p) => openPaths.has(p.toLowerCase())),
+                        ...allOpen.map((f) => f.path).filter((p) => !get(mruFiles).some((m) => m.toLowerCase() === p.toLowerCase()))
+                    ];
+
+                    openFileSwitcher(ordered, event.shiftKey ? ordered.length - 1 : 1);
+
+                }
+
+            }
+
+            return;
 
         }
 
@@ -213,6 +312,12 @@
 
     <!-- External Change Conflict Modal -->
     <ExternalChangeModal />
+
+    <!-- Global Quick Open (Ctrl+P, Ctrl+G, Ctrl+Shift+O) -->
+    <QuickOpen />
+
+    <!-- File History Switcher (Ctrl+Tab) -->
+    <FileHistorySwitcher />
 
 </div>
 
