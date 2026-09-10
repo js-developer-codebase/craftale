@@ -32,6 +32,122 @@ async function pathExists(targetPath) {
 
 /*
 |--------------------------------------------------------------------------
+| Helper: Find File with Extension / Index Fallbacks
+|--------------------------------------------------------------------------
+| Resolves files when imports omit extensions or reference directories,
+| e.g. .js -> .tsx, .ts, .jsx, or /Sidebar/index.js -> /Sidebar.tsx
+|--------------------------------------------------------------------------
+*/
+
+async function findFileWithFallback(targetPath) {
+
+    if (!targetPath) return null;
+
+    try {
+
+        const stat = await fs.stat(targetPath).catch(() => null);
+
+        if (stat && stat.isFile()) {
+
+            return targetPath;
+
+        }
+
+        const ext = path.extname(targetPath).toLowerCase();
+
+        const dir = stat && stat.isDirectory() ? targetPath : path.dirname(targetPath);
+
+        const baseWithoutExt = stat && stat.isDirectory() ? "" : path.basename(targetPath, ext);
+
+        const commonExts = [".tsx", ".ts", ".jsx", ".js", ".svelte", ".mjs", ".json", ".css", ".scss"];
+
+        /* If it's a directory, check for index.* */
+        if (stat && stat.isDirectory()) {
+
+            for (const altExt of commonExts) {
+
+                const cand = path.join(dir, `index${altExt}`);
+
+                if (await pathExists(cand)) {
+
+                    return cand;
+
+                }
+
+            }
+
+        }
+
+        /* Check alternate extensions for the filename */
+        if (baseWithoutExt) {
+
+            for (const altExt of commonExts) {
+
+                if (altExt === ext) continue;
+
+                const cand = path.join(dir, `${baseWithoutExt}${altExt}`);
+
+                if (await pathExists(cand)) {
+
+                    return cand;
+
+                }
+
+            }
+
+        }
+
+        /* If path was .../Folder/index.*, check if .../Folder.* exists */
+        if (baseWithoutExt === "index") {
+
+            const parentDir = path.dirname(dir);
+
+            const folderName = path.basename(dir);
+
+            for (const altExt of commonExts) {
+
+                const cand = path.join(parentDir, `${folderName}${altExt}`);
+
+                if (await pathExists(cand)) {
+
+                    return cand;
+
+                }
+
+            }
+
+        }
+
+        /* If path had no extension and was not a directory, check directory index candidates */
+        if (!ext && baseWithoutExt) {
+
+            for (const altExt of commonExts) {
+
+                const cand = path.join(targetPath, `index${altExt}`);
+
+                if (await pathExists(cand)) {
+
+                    return cand;
+
+                }
+
+            }
+
+        }
+
+    } catch {
+
+        /* Ignore filesystem stat errors */
+
+    }
+
+    return null;
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Helper: Generate Unique Copy Name
 |--------------------------------------------------------------------------
 */
@@ -286,9 +402,23 @@ ipcMain.handle(
 
         try {
 
+            let targetPath = filePath;
+
+            if (!await pathExists(targetPath)) {
+
+                const fallback = await findFileWithFallback(targetPath);
+
+                if (fallback) {
+
+                    targetPath = fallback;
+
+                }
+
+            }
+
             const content =
                 await fs.readFile(
-                    filePath,
+                    targetPath,
                     "utf-8"
                 );
 
@@ -296,12 +426,46 @@ ipcMain.handle(
 
         } catch (error) {
 
-            console.error(
-                "[FS] Failed to read file:",
-                error
-            );
+            if (error.code !== "ENOENT") {
+
+                console.error(
+                    "[FS] Failed to read file:",
+                    error
+                );
+
+            }
 
             throw error;
+
+        }
+
+    }
+);
+
+
+
+/*
+|--------------------------------------------------------------------------
+| Resolve File Path with Fallback
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:resolve-file",
+    async (
+        event,
+        filePath
+    ) => {
+
+        try {
+
+            const resolved = await findFileWithFallback(filePath);
+
+            return resolved || filePath;
+
+        } catch {
+
+            return filePath;
 
         }
 
@@ -982,6 +1146,10 @@ ipcMain.handle(
             throw error;
 
         }
+
+    }
+);
+
 
 /*
 |--------------------------------------------------------------------------

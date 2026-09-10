@@ -279,6 +279,42 @@ contextBridge.exposeInMainWorld(
                     directoryPath
                 );
 
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Exists
+            |--------------------------------------------------------------------------
+            */
+
+            exists: (
+                filePath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:exists",
+                    filePath
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Resolve File (Fallback with Extensions)
+            |--------------------------------------------------------------------------
+            */
+
+            resolveFile: (
+                filePath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:resolve-file",
+                    filePath
+                );
+
             }
 
         },

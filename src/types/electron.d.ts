@@ -156,6 +156,16 @@ declare global {
                     extension: string;
                 }[]>;
 
+
+                exists(
+                    filePath: string
+                ): Promise<boolean>;
+
+
+                resolveFile(
+                    filePath: string
+                ): Promise<string>;
+
             };
 
 

@@ -1432,18 +1432,38 @@
     async function jumpToLocation(location: { path: string; line: number; column?: number }) {
         if (!location.path) return;
 
-        if (!$activeFile || !pathsEqual($activeFile.path, location.path)) {
-            const existing = $openedFiles.find(f => pathsEqual(f.path, location.path));
+        let targetPath = location.path;
+
+        if (!$activeFile || !pathsEqual($activeFile.path, targetPath)) {
+            const existing = $openedFiles.find(f => pathsEqual(f.path, targetPath));
             if (existing) {
                 activateFile(existing.path);
             } else {
-                try {
-                    const content = await window.craftale.filesystem.readFile(location.path);
-                    const name = location.path.split(/[\\/]/).pop() || location.path;
-                    openFile({ name, path: location.path, content }, { preview: false });
-                } catch (err) {
-                    console.error("[EDITOR] Failed to open file for navigation:", err);
-                    return;
+                if (window.craftale?.filesystem?.resolveFile) {
+                    targetPath = await window.craftale.filesystem.resolveFile(targetPath);
+                }
+
+                const alreadyOpen = $openedFiles.find(f => pathsEqual(f.path, targetPath));
+                if (alreadyOpen) {
+                    activateFile(alreadyOpen.path);
+                } else {
+                    const exists = window.craftale?.filesystem?.exists
+                        ? await window.craftale.filesystem.exists(targetPath)
+                        : true;
+
+                    if (!exists) {
+                        console.warn("[EDITOR] Cannot navigate, file not found:", targetPath);
+                        return;
+                    }
+
+                    try {
+                        const content = await window.craftale.filesystem.readFile(targetPath);
+                        const name = targetPath.split(/[\\/]/).pop() || targetPath;
+                        openFile({ name, path: targetPath, content }, { preview: false });
+                    } catch (err) {
+                        console.warn("[EDITOR] Failed to open file for navigation:", err);
+                        return;
+                    }
                 }
             }
         }
@@ -1519,23 +1539,24 @@
             const relPath = importMatch[1];
             if (relPath.startsWith("./") || relPath.startsWith("../")) {
                 const currentDir = $activeFile.path.replace(/[\\/][^\\/]+$/, "");
-                const candidates = [
-                    `${currentDir}/${relPath}`,
-                    `${currentDir}/${relPath}.ts`,
-                    `${currentDir}/${relPath}.js`,
-                    `${currentDir}/${relPath}.svelte`,
-                    `${currentDir}/${relPath}/index.ts`,
-                    `${currentDir}/${relPath}/index.js`
-                ];
-                for (const cand of candidates) {
+                const candidateBase = `${currentDir}/${relPath}`.replace(/\\/g, "/");
+
+                let resolved = candidateBase;
+                if (window.craftale?.filesystem?.resolveFile) {
+                    resolved = await window.craftale.filesystem.resolveFile(candidateBase);
+                }
+
+                const exists = window.craftale?.filesystem?.exists
+                    ? await window.craftale.filesystem.exists(resolved)
+                    : true;
+
+                if (exists) {
                     try {
-                        const cleanPath = cand.replace(/\\/g, "/");
-                        const content = await window.craftale.filesystem.readFile(cleanPath);
-                        const name = cleanPath.split("/").pop() || cleanPath;
-                        openFile({ name, path: cleanPath, content }, { preview: false });
-                        break;
+                        const content = await window.craftale.filesystem.readFile(resolved);
+                        const name = resolved.split(/[\\/]/).pop() || resolved;
+                        openFile({ name, path: resolved, content }, { preview: false });
                     } catch {
-                        // try next candidate
+                        // ignore
                     }
                 }
             }
