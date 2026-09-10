@@ -7,6 +7,16 @@ import {
 } from "./workspace";
 import { notify } from "./notifications";
 
+type WatcherCallback = () => void;
+const watcherCallbacks = new Set<WatcherCallback>();
+
+export function registerWatcherCallback(cb: WatcherCallback) {
+    watcherCallbacks.add(cb);
+    return () => {
+        watcherCallbacks.delete(cb);
+    };
+}
+
 
 /*
 |--------------------------------------------------------------------------
@@ -163,6 +173,15 @@ export function handleWatcherEvent(event: {
 }) {
 
     console.log("[WATCHER EVENT]", event.type, event.path);
+
+    /* Notify external listeners (such as Git status) */
+    watcherCallbacks.forEach((cb) => {
+        try {
+            cb();
+        } catch (e) {
+            console.error("[WATCHER CALLBACK ERROR]", e);
+        }
+    });
 
 
     /*

@@ -388,6 +388,151 @@ declare global {
 
             };
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | GIT SOURCE CONTROL
+            |--------------------------------------------------------------------------
+            */
+
+            git: {
+
+                isRepo(
+                    workspacePath: string
+                ): Promise<boolean>;
+
+                init(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                getStatus(
+                    workspacePath: string
+                ): Promise<{
+                    isRepo: boolean;
+                    branch: string;
+                    upstream: string;
+                    ahead: number;
+                    behind: number;
+                    staged: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        status: string;
+                    }>;
+                    unstaged: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        status: string;
+                    }>;
+                    untracked: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        status: string;
+                    }>;
+                    error?: string;
+                }>;
+
+                stage(
+                    workspacePath: string,
+                    filePaths: string[] | "all"
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                unstage(
+                    workspacePath: string,
+                    filePaths: string[] | "all"
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                discard(
+                    workspacePath: string,
+                    filePaths: string[],
+                    isUntracked?: boolean
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                commit(
+                    workspacePath: string,
+                    message: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                pull(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                push(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                fetch(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                getBranches(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    branches: Array<{
+                        fullName: string;
+                        name: string;
+                        isCurrent: boolean;
+                        isRemote: boolean;
+                    }>;
+                    error?: string;
+                }>;
+
+                checkout(
+                    workspacePath: string,
+                    branchName: string,
+                    createNew?: boolean
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+            };
+
         };
 
     };

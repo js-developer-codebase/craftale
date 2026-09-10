@@ -607,6 +607,65 @@ contextBridge.exposeInMainWorld(
 
             }
 
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | GIT SOURCE CONTROL
+        |--------------------------------------------------------------------------
+        */
+
+        git: {
+
+            isRepo: (workspacePath) => {
+                return ipcRenderer.invoke("git:is-repo", workspacePath);
+            },
+
+            init: (workspacePath) => {
+                return ipcRenderer.invoke("git:init", workspacePath);
+            },
+
+            getStatus: (workspacePath) => {
+                return ipcRenderer.invoke("git:get-status", workspacePath);
+            },
+
+            stage: (workspacePath, filePaths) => {
+                return ipcRenderer.invoke("git:stage", workspacePath, filePaths);
+            },
+
+            unstage: (workspacePath, filePaths) => {
+                return ipcRenderer.invoke("git:unstage", workspacePath, filePaths);
+            },
+
+            discard: (workspacePath, filePaths, isUntracked = false) => {
+                return ipcRenderer.invoke("git:discard", workspacePath, filePaths, isUntracked);
+            },
+
+            commit: (workspacePath, message) => {
+                return ipcRenderer.invoke("git:commit", workspacePath, message);
+            },
+
+            pull: (workspacePath) => {
+                return ipcRenderer.invoke("git:pull", workspacePath);
+            },
+
+            push: (workspacePath) => {
+                return ipcRenderer.invoke("git:push", workspacePath);
+            },
+
+            fetch: (workspacePath) => {
+                return ipcRenderer.invoke("git:fetch", workspacePath);
+            },
+
+            getBranches: (workspacePath) => {
+                return ipcRenderer.invoke("git:get-branches", workspacePath);
+            },
+
+            checkout: (workspacePath, branchName, createNew = false) => {
+                return ipcRenderer.invoke("git:checkout", workspacePath, branchName, createNew);
+            }
+
         }
 
     }

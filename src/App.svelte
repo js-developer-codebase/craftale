@@ -11,6 +11,12 @@
     import WorkspaceSearch
         from "./components/WorkspaceSearch.svelte";
 
+    import SourceControl
+        from "./components/SourceControl.svelte";
+
+    import BranchModal
+        from "./components/BranchModal.svelte";
+
     import ActivityBar
         from "./components/ActivityBar.svelte";
 
@@ -67,6 +73,15 @@
         navigateNextMatch,
         navigatePrevMatch
     } from "./stores/search";
+
+    import {
+        refreshGitStatus,
+        triggerGitRefreshDebounced
+    } from "./stores/git";
+
+    import {
+        registerWatcherCallback
+    } from "./stores/watcher";
 
     import { get } from "svelte/store";
 
@@ -238,6 +253,23 @@
 
         }
 
+        /* Source Control: Ctrl + Shift + G */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "g"
+        ) {
+
+            event.preventDefault();
+
+            openSidebarView("sourceControl");
+
+            void refreshGitStatus();
+
+            return;
+
+        }
+
         /* Next/Prev Search Match: F4 / Shift + F4 */
         if (event.key === "F4") {
 
@@ -295,6 +327,9 @@
     }
 
 
+    let unregisterWatcher: (() => void) | null = null;
+    let unregisterWorkspace: (() => void) | null = null;
+
     onMount(() => {
 
         window.addEventListener(
@@ -312,6 +347,16 @@
             "unhandledrejection",
             handleUnhandledRejection
         );
+
+        unregisterWatcher = registerWatcherCallback(() => {
+            triggerGitRefreshDebounced();
+        });
+
+        unregisterWorkspace = workspacePath.subscribe((path) => {
+            if (path) {
+                triggerGitRefreshDebounced(200);
+            }
+        });
 
     });
 
@@ -333,6 +378,16 @@
             "unhandledrejection",
             handleUnhandledRejection
         );
+
+        if (unregisterWatcher) {
+            unregisterWatcher();
+            unregisterWatcher = null;
+        }
+
+        if (unregisterWorkspace) {
+            unregisterWorkspace();
+            unregisterWorkspace = null;
+        }
 
     });
 
@@ -364,6 +419,8 @@
                 <FileExplorer />
             {:else if $activeSidebarView === "search"}
                 <WorkspaceSearch />
+            {:else if $activeSidebarView === "sourceControl"}
+                <SourceControl />
             {/if}
 
         </aside>
@@ -421,6 +478,9 @@
 
     <!-- File History Switcher (Ctrl+Tab) -->
     <FileHistorySwitcher />
+
+    <!-- Branch Modal -->
+    <BranchModal />
 
 </div>
 

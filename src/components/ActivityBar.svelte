@@ -6,6 +6,7 @@
         type SidebarView
     } from "../stores/navigation";
     import { totalMatches } from "../stores/search";
+    import { totalChangesCount, isGitRepo } from "../stores/git";
     import { openedFiles, toggleTerminal } from "../stores/workspace";
 
     const dirtyCount = $derived($openedFiles.filter((f) => f.isDirty).length);
@@ -52,6 +53,30 @@
             {#if $totalMatches > 0}
                 <span class="badge search" title={`${$totalMatches} search matches`}>
                     {$totalMatches > 99 ? "99+" : $totalMatches}
+                </span>
+            {/if}
+        </button>
+
+        <!-- Source Control Button -->
+        <button
+            type="button"
+            class="action-item"
+            class:active={$isSidebarVisible && $activeSidebarView === "sourceControl"}
+            title="Source Control (Ctrl+Shift+G)"
+            onclick={() => toggleSidebarView("sourceControl")}
+            aria-label="Source Control"
+        >
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="9" r="3" />
+                <line x1="6" y1="9" x2="6" y2="15" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
+
+            {#if $isGitRepo && $totalChangesCount > 0}
+                <span class="badge git" title={`${$totalChangesCount} pending changes`}>
+                    {$totalChangesCount > 99 ? "99+" : $totalChangesCount}
                 </span>
             {/if}
         </button>
@@ -157,6 +182,11 @@
     }
 
     .badge.dirty {
+        background: #007acc;
+        color: #ffffff;
+    }
+
+    .badge.git {
         background: #007acc;
         color: #ffffff;
     }

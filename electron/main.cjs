@@ -23,6 +23,7 @@ const watcherManager =
 
 require("./ipc/fileSystem.cjs");
 require("./ipc/search.cjs");
+require("./ipc/git.cjs");
 
 
 /*
@@ -115,9 +116,24 @@ function createWindow() {
 
     /*
     |--------------------------------------------------------------------------
-    | DevTools
+    | DevTools & Error Logging
     |--------------------------------------------------------------------------
     */
+
+    window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+        const levels = ["DEBUG", "INFO", "WARN", "ERROR"];
+        const lvl = levels[level] || "LOG";
+        console.log(`[RENDERER ${lvl}] ${message} (${sourceId}:${line})`);
+    });
+
+    window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+        console.error(`[MAIN] Failed to load URL: ${validatedURL} (${errorCode}: ${errorDescription})`);
+        const distIndex = path.join(__dirname, "..", "dist", "index.html");
+        if (isDev && fs.existsSync(distIndex) && validatedURL.includes("5173")) {
+            console.log("[MAIN] Vite dev server unreachable. Falling back to dist/index.html...");
+            window.loadFile(distIndex);
+        }
+    });
 
     window.webContents.openDevTools();
 
