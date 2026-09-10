@@ -71,19 +71,105 @@ declare global {
 
             terminal: {
 
-                execute(
-                    command: string,
+                /*
+                |--------------------------------------------------------------------------
+                | Create Terminal
+                |--------------------------------------------------------------------------
+                |
+                | Spawns a persistent PTY shell process.
+                |
+                */
 
-                    cwd?: string
+                create(
+                    cwd?: string,
+                    cols?: number,
+                    rows?: number
                 ): Promise<{
-
-                    stdout: string;
-
-                    stderr: string;
-
-                    exitCode: number;
-
+                    terminalId: number;
+                    shell: string;
+                    pid: number;
                 }>;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Write to Terminal
+                |--------------------------------------------------------------------------
+                |
+                | Sends user input (keystrokes) to the PTY.
+                |
+                */
+
+                write(
+                    terminalId: number,
+                    data: string
+                ): Promise<boolean>;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Resize Terminal
+                |--------------------------------------------------------------------------
+                |
+                | Resizes the PTY to match xterm dimensions.
+                |
+                */
+
+                resize(
+                    terminalId: number,
+                    cols: number,
+                    rows: number
+                ): Promise<boolean>;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Kill Terminal
+                |--------------------------------------------------------------------------
+                |
+                | Kills the PTY process.
+                |
+                */
+
+                kill(
+                    terminalId: number
+                ): Promise<boolean>;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Terminal Data Listener
+                |--------------------------------------------------------------------------
+                |
+                | Receives PTY output.
+                | Returns an unsubscribe function.
+                |
+                */
+
+                onData(
+                    callback: (
+                        terminalId: number,
+                        data: string
+                    ) => void
+                ): () => void;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | Terminal Exit Listener
+                |--------------------------------------------------------------------------
+                |
+                | Receives PTY exit events.
+                | Returns an unsubscribe function.
+                |
+                */
+
+                onExit(
+                    callback: (
+                        terminalId: number,
+                        exitCode: number
+                    ) => void
+                ): () => void;
 
             };
 

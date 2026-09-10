@@ -1,4 +1,4 @@
-import { writable } from "svelte/store";
+import { writable, get } from "svelte/store";
 
 
 /*
@@ -317,6 +317,80 @@ export function markFileSaved(
 
         }
     );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Save File
+|--------------------------------------------------------------------------
+*/
+
+export async function saveFile(
+    path: string
+): Promise<boolean> {
+
+    const files =
+        get(openedFiles);
+
+
+    const file =
+        files.find(
+            item =>
+                item.path === path
+        );
+
+
+    if (!file) {
+
+        console.error(
+            "[STORE] File not found:",
+            path
+        );
+
+        return false;
+
+    }
+
+
+    try {
+
+        await (window as any)
+            .craftale
+            .filesystem
+            .writeFile(
+                path,
+                file.content
+            );
+
+
+        markFileSaved(
+            path,
+            file.content
+        );
+
+
+        console.log(
+            "[STORE] File saved:",
+            path
+        );
+
+
+        return true;
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[STORE] Save failed:",
+            error
+        );
+
+        return false;
+
+    }
 
 }
 

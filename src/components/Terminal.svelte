@@ -1,5 +1,16 @@
 <script lang="ts">
 
+    import {
+        onMount,
+        onDestroy
+    } from "svelte";
+
+    import { Terminal as XTerm } from "@xterm/xterm";
+    import { FitAddon } from "@xterm/addon-fit";
+    import { WebLinksAddon } from "@xterm/addon-web-links";
+    import "@xterm/xterm/css/xterm.css";
+
+
     /*
     |--------------------------------------------------------------------------
     | Props
@@ -21,279 +32,341 @@
     |--------------------------------------------------------------------------
     */
 
-    let command = $state("");
+    let terminalId =
+        $state<number | null>(null);
 
-    let output = $state("");
+    let shellName =
+        $state("PowerShell");
 
-    let isRunning = $state(false);
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Command History
-    |--------------------------------------------------------------------------
-    */
-
-    let commandHistory =
-        $state<string[]>([]);
-
-    let historyIndex =
-        $state(-1);
+    let status =
+        $state<"initializing" | "running" | "exited">("initializing");
 
 
     /*
     |--------------------------------------------------------------------------
-    | DOM References
+    | DOM Container Reference
     |--------------------------------------------------------------------------
     */
 
-    let inputElement:
-        HTMLInputElement | undefined =
-        $state();
-
-    let outputElement:
-        HTMLDivElement | undefined =
-        $state();
+    let terminalContainer:
+        HTMLDivElement;
 
 
     /*
     |--------------------------------------------------------------------------
-    | Execute Command
+    | xterm Instances
     |--------------------------------------------------------------------------
     */
 
-    async function executeCommand() {
+    let xtermInstance: XTerm | null =
+        null;
 
-        const value =
-            command.trim();
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Empty command
-        |--------------------------------------------------------------------------
-        */
-
-        if (!value) {
-
-            return;
-
-        }
+    let fitAddon: FitAddon | null =
+        null;
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Prevent multiple commands
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Event Cleanup Handlers
+    |--------------------------------------------------------------------------
+    */
 
-        if (isRunning) {
+    let removeDataListener:
+        (() => void) | null = null;
 
-            return;
+    let removeExitListener:
+        (() => void) | null = null;
 
-        }
+    let resizeObserver:
+        ResizeObserver | null = null;
+
+    let resizeDebounceTimer:
+        ReturnType<typeof setTimeout> | null = null;
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Add command to history
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Safe Dimensions Calculation
+    |--------------------------------------------------------------------------
+    */
 
-        if (
-            commandHistory.length === 0 ||
-            commandHistory[
-                commandHistory.length - 1
-            ] !== value
-        ) {
+    function getSafeDimensions(): { cols: number; rows: number } {
 
-            commandHistory.push(value);
+        if (!xtermInstance || !fitAddon) {
+
+            return { cols: 80, rows: 24 };
 
         }
-
-
-        historyIndex =
-            commandHistory.length;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Show command in terminal
-        |--------------------------------------------------------------------------
-        */
-
-        const prompt =
-            cwd || "Craftale";
-
-
-        output +=
-            `PS ${prompt}> ${value}\n`;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Clear input
-        |--------------------------------------------------------------------------
-        */
-
-        command = "";
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Running
-        |--------------------------------------------------------------------------
-        */
-
-        isRunning = true;
-
-
-        scrollToBottom();
 
 
         try {
 
-            console.log(
-                "[TERMINAL] Executing:",
-                value
-            );
+            const proposed =
+                fitAddon.proposeDimensions();
 
 
-            console.log(
-                "[TERMINAL] CWD:",
-                cwd
-            );
+            if (
+                proposed &&
+                proposed.cols >= 10 &&
+                proposed.rows >= 3
+            ) {
+
+                return proposed;
+
+            }
+
+        } catch {
+
+            // Fallback
+
+        }
+
+
+        const cols =
+            xtermInstance.cols > 0 ? xtermInstance.cols : 80;
+
+        const rows =
+            xtermInstance.rows > 0 ? xtermInstance.rows : 24;
+
+
+        return { cols, rows };
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create & Start Terminal
+    |--------------------------------------------------------------------------
+    */
+
+    async function startTerminal() {
+
+        status = "initializing";
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Initialize xterm if not already created
+        |--------------------------------------------------------------------------
+        */
+
+        if (!xtermInstance) {
+
+            xtermInstance = new XTerm({
+
+                cursorBlink: true,
+
+                cursorStyle: "bar",
+
+                fontSize: 13,
+
+                fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace",
+
+                lineHeight: 1.2,
+
+                theme: {
+
+                    background: "#1e1e1e",
+
+                    foreground: "#cccccc",
+
+                    cursor: "#ffffff",
+
+                    selectionBackground: "#264f78",
+
+                    black: "#000000",
+
+                    red: "#cd3131",
+
+                    green: "#0dbc79",
+
+                    yellow: "#e5e510",
+
+                    blue: "#2472c8",
+
+                    magenta: "#bc3fbc",
+
+                    cyan: "#11a8cd",
+
+                    white: "#e5e5e5",
+
+                    brightBlack: "#666666",
+
+                    brightRed: "#f14c4c",
+
+                    brightGreen: "#23d18b",
+
+                    brightYellow: "#f5f543",
+
+                    brightBlue: "#3b8eea",
+
+                    brightMagenta: "#d670d6",
+
+                    brightCyan: "#29b8db",
+
+                    brightWhite: "#e5e5e5"
+
+                },
+
+                scrollback: 5000,
+
+                allowProposedApi: true,
+
+                convertEol: false
+
+            });
+
+
+            fitAddon = new FitAddon();
+
+            xtermInstance.loadAddon(fitAddon);
+
+            xtermInstance.loadAddon(new WebLinksAddon());
+
+
+            xtermInstance.open(terminalContainer);
 
 
             /*
             |--------------------------------------------------------------------------
-            | Electron IPC
+            | User Input -> Send to PTY
             |--------------------------------------------------------------------------
             */
 
-            const result =
-                await window
-                    .craftale
-                    .terminal
-                    .execute(
-                        value,
-                        cwd
+            xtermInstance.onData((data: string) => {
+
+                if (
+                    terminalId !== null &&
+                    status === "running" &&
+                    window.craftale?.terminal
+                ) {
+
+                    window.craftale.terminal.write(
+                        terminalId,
+                        data
                     );
 
+                }
 
-            console.log(
-                "[TERMINAL] Result:",
-                result
-            );
+            });
 
+        } else {
 
-            console.log(
-                "[TERMINAL] STDOUT:",
-                result.stdout
-            );
-
-
-            console.log(
-                "[TERMINAL] STDERR:",
-                result.stderr
-            );
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | STDOUT
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                result.stdout
-            ) {
-
-                output +=
-                    result.stdout;
-
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | STDERR
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                result.stderr
-            ) {
-
-                output +=
-                    result.stderr;
-
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Exit Code
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                result.exitCode !== 0
-            ) {
-
-                output +=
-                    `\n[Process exited with code ${result.exitCode}]\n`;
-
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Make sure output ends with newline
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                !output.endsWith("\n")
-            ) {
-
-                output += "\n";
-
-            }
+            xtermInstance.clear();
 
         }
 
-        catch (error) {
 
-            console.error(
-                "[TERMINAL] Execution failed:",
-                error
-            );
+        /*
+        |--------------------------------------------------------------------------
+        | Fit dimensions
+        |--------------------------------------------------------------------------
+        */
 
+        try {
 
-            output +=
-                `\nTerminal error: ${String(error)}\n`;
+            fitAddon?.fit();
+
+        } catch {
+
+            // Container may still be rendering
 
         }
 
-        finally {
 
-            isRunning = false;
+        const { cols, rows } =
+            getSafeDimensions();
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Restore focus
-            |--------------------------------------------------------------------------
-            */
+        /*
+        |--------------------------------------------------------------------------
+        | Setup IPC listeners BEFORE spawning
+        |--------------------------------------------------------------------------
+        */
 
-            setTimeout(() => {
+        removeDataListener?.();
 
-                inputElement?.focus();
+        removeExitListener?.();
 
-                scrollToBottom();
 
-            }, 0);
+        removeDataListener =
+            window.craftale.terminal.onData(
+                (id: number, data: string) => {
+
+                    if (
+                        terminalId === null ||
+                        id === terminalId
+                    ) {
+
+                        xtermInstance?.write(data);
+
+                    }
+
+                }
+            );
+
+
+        removeExitListener =
+            window.craftale.terminal.onExit(
+                (id: number, exitCode: number) => {
+
+                    if (
+                        terminalId === null ||
+                        id === terminalId
+                    ) {
+
+                        status = "exited";
+
+                        xtermInstance?.write(
+                            `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m\r\n`
+                        );
+
+                    }
+
+                }
+            );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Spawn Shell
+        |--------------------------------------------------------------------------
+        */
+
+        try {
+
+            const result =
+                await window.craftale.terminal.create(
+                    cwd || undefined,
+                    cols,
+                    rows
+                );
+
+
+            terminalId =
+                result.terminalId;
+
+            shellName =
+                result.shell
+                    .replace(".exe", "")
+                    .replace(/^.*[/\\]/, "");
+
+            status = "running";
+
+
+            // Focus xterm
+            xtermInstance?.focus();
+
+        } catch (error) {
+
+            console.error("[TERMINAL] Spawn failed:", error);
+
+            status = "exited";
+
+            xtermInstance?.write(
+                `\r\n\x1b[31mFailed to start terminal: ${error}\x1b[0m\r\n`
+            );
 
         }
 
@@ -302,191 +375,58 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Keyboard Handler
+    | Handle Container Resize
     |--------------------------------------------------------------------------
     */
 
-    function handleInputKeydown(
-        event: KeyboardEvent
-    ) {
+    function handleResize() {
 
-        console.log(
-            "[TERMINAL] Key:",
-            event.key
-        );
+        if (resizeDebounceTimer) {
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | ENTER
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            event.key === "Enter"
-        ) {
-
-            event.preventDefault();
-
-            event.stopPropagation();
-
-
-            executeCommand();
-
-            return;
+            clearTimeout(resizeDebounceTimer);
 
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | ARROW UP
-        |--------------------------------------------------------------------------
-        */
+        resizeDebounceTimer = setTimeout(() => {
 
-        if (
-            event.key === "ArrowUp"
-        ) {
+            if (!fitAddon || !xtermInstance) {
 
-            event.preventDefault();
-
-            navigateHistory(
-                "up"
-            );
-
-            return;
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | ARROW DOWN
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            event.key === "ArrowDown"
-        ) {
-
-            event.preventDefault();
-
-            navigateHistory(
-                "down"
-            );
-
-            return;
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | CTRL + L
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            event.ctrlKey &&
-            event.key.toLowerCase() === "l"
-        ) {
-
-            event.preventDefault();
-
-            clearTerminal();
-
-            return;
-
-        }
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Command History
-    |--------------------------------------------------------------------------
-    */
-
-    function navigateHistory(
-        direction:
-            | "up"
-            | "down"
-    ) {
-
-        if (
-            commandHistory.length === 0
-        ) {
-
-            return;
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | UP
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            direction === "up"
-        ) {
-
-            if (
-                historyIndex > 0
-            ) {
-
-                historyIndex--;
+                return;
 
             }
 
 
-            command =
-                commandHistory[
-                    historyIndex
-                ] ?? "";
+            try {
 
-        }
+                fitAddon.fit();
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | DOWN
-        |--------------------------------------------------------------------------
-        */
-
-        else {
-
-            if (
-                historyIndex <
-                commandHistory.length
-            ) {
-
-                historyIndex++;
-
-            }
+                const { cols, rows } =
+                    getSafeDimensions();
 
 
-            if (
-                historyIndex >=
-                commandHistory.length
-            ) {
+                if (
+                    terminalId !== null &&
+                    status === "running" &&
+                    cols > 0 &&
+                    rows > 0
+                ) {
 
-                command = "";
+                    window.craftale.terminal.resize(
+                        terminalId,
+                        cols,
+                        rows
+                    );
+
+                }
+
+            } catch {
+
+                // Layout transition
 
             }
 
-            else {
-
-                command =
-                    commandHistory[
-                        historyIndex
-                    ] ?? "";
-
-            }
-
-        }
+        }, 60);
 
     }
 
@@ -499,579 +439,356 @@
 
     function clearTerminal() {
 
-        output = "";
+        xtermInstance?.clear();
 
-        inputElement?.focus();
+        xtermInstance?.focus();
 
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Scroll To Bottom
+    | Restart Terminal
     |--------------------------------------------------------------------------
     */
 
-    function scrollToBottom() {
+    async function restartTerminal() {
 
-        setTimeout(() => {
+        if (terminalId !== null) {
 
-            if (
-                !outputElement
-            ) {
+            try {
 
-                return;
+                await window.craftale.terminal.kill(terminalId);
+
+            } catch {
+
+                // Ignore
 
             }
 
+            terminalId = null;
 
-            outputElement.scrollTop =
-                outputElement.scrollHeight;
+        }
 
-        }, 0);
+
+        await startTerminal();
 
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Kill Terminal
+    |--------------------------------------------------------------------------
+    */
+
+    async function killTerminal() {
+
+        if (terminalId !== null) {
+
+            try {
+
+                await window.craftale.terminal.kill(terminalId);
+
+            } catch {
+
+                // Ignore
+
+            }
+
+            status = "exited";
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lifecycle: Mount
+    |--------------------------------------------------------------------------
+    */
+
+    onMount(() => {
+
+        startTerminal();
+
+
+        resizeObserver = new ResizeObserver(() => {
+
+            handleResize();
+
+        });
+
+
+        if (terminalContainer) {
+
+            resizeObserver.observe(terminalContainer);
+
+        }
+
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lifecycle: Destroy
+    |--------------------------------------------------------------------------
+    */
+
+    onDestroy(() => {
+
+        if (resizeDebounceTimer) {
+
+            clearTimeout(resizeDebounceTimer);
+
+        }
+
+
+        resizeObserver?.disconnect();
+
+        resizeObserver = null;
+
+
+        removeDataListener?.();
+
+        removeDataListener = null;
+
+
+        removeExitListener?.();
+
+        removeExitListener = null;
+
+
+        if (terminalId !== null) {
+
+            window.craftale.terminal.kill(terminalId).catch(() => {});
+
+            terminalId = null;
+
+        }
+
+
+        xtermInstance?.dispose();
+
+        xtermInstance = null;
+
+    });
 
 </script>
 
 
-<!--
-|--------------------------------------------------------------------------
-| TERMINAL
-|--------------------------------------------------------------------------
--->
-
 <div class="terminal">
 
-
-    <!--
-    |--------------------------------------------------------------------------
-    | HEADER
-    |--------------------------------------------------------------------------
-    -->
-
+    <!-- Header -->
     <div class="terminal-header">
-
 
         <div class="terminal-title">
 
-            <span class="terminal-icon">
-                &gt;_
-            </span>
+            <span class="terminal-icon">&gt;_</span>
 
+            <span class="terminal-name">TERMINAL</span>
 
-            <span class="terminal-name">
-                TERMINAL
-            </span>
+            <span class="shell">{shellName}</span>
 
+            {#if status === "exited"}
 
-            <span class="shell">
-                PowerShell
-            </span>
+                <span class="badge exited">(exited)</span>
+
+            {:else if status === "initializing"}
+
+                <span class="badge starting">(starting...)</span>
+
+            {/if}
 
         </div>
 
 
-        <button
-            type="button"
-            class="clear-button"
-            onclick={clearTerminal}
-        >
+        <div class="terminal-actions">
 
-            Clear
+            <!-- Clear -->
+            <button
+                type="button"
+                class="action-button"
+                onclick={clearTerminal}
+                title="Clear Terminal (Ctrl+L)"
+            >
+                ⌧
+            </button>
 
-        </button>
+            <!-- Restart -->
+            <button
+                type="button"
+                class="action-button"
+                onclick={restartTerminal}
+                title="Restart Terminal"
+                disabled={status === "initializing"}
+            >
+                ↻
+            </button>
+
+            <!-- Kill -->
+            {#if status === "running"}
+
+                <button
+                    type="button"
+                    class="action-button kill"
+                    onclick={killTerminal}
+                    title="Kill Terminal Process"
+                >
+                    ✕
+                </button>
+
+            {/if}
+
+        </div>
 
     </div>
 
 
-    <!--
-    |--------------------------------------------------------------------------
-    | OUTPUT
-    |--------------------------------------------------------------------------
-    -->
-
+    <!-- Body -->
     <div
-        class="terminal-output"
-        bind:this={outputElement}
-    >
-
-        {#if output.length > 0}
-
-            <pre>{output}</pre>
-
-        {:else}
-
-            <div class="welcome">
-
-                <div class="welcome-title">
-
-                    Craftale Terminal
-
-                </div>
-
-
-                <div class="welcome-subtitle">
-
-                    PowerShell
-
-                </div>
-
-            </div>
-
-        {/if}
-
-    </div>
-
-
-    <!--
-    |--------------------------------------------------------------------------
-    | INPUT
-    |--------------------------------------------------------------------------
-    -->
-
-    <div class="terminal-input">
-
-
-        <!-- Prompt -->
-
-        <span class="prompt">
-
-            PS
-
-        </span>
-
-
-        <!-- Command Input -->
-
-        <input
-            bind:this={inputElement}
-            bind:value={command}
-
-            type="text"
-
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-
-            placeholder="Enter command..."
-
-            disabled={isRunning}
-
-            onkeydown={handleInputKeydown}
-        />
-
-
-        <!-- Running indicator -->
-
-        {#if isRunning}
-
-            <span class="running">
-
-                Running...
-
-            </span>
-
-        {/if}
-
-    </div>
+        class="terminal-body"
+        bind:this={terminalContainer}
+        onclick={() => xtermInstance?.focus()}
+        role="region"
+        aria-label="Terminal output and input"
+    ></div>
 
 </div>
 
 
 <style>
 
-    /*
-    |--------------------------------------------------------------------------
-    | TERMINAL
-    |--------------------------------------------------------------------------
-    */
-
     .terminal {
-
         width: 100%;
         height: 100%;
-
         display: flex;
         flex-direction: column;
-
         overflow: hidden;
-
         background: #1e1e1e;
-
         color: #cccccc;
-
-        font-family:
-            Consolas,
-            "Cascadia Code",
-            "Courier New",
-            monospace;
-
-        font-size: 13px;
-
     }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | HEADER
-    |--------------------------------------------------------------------------
-    */
 
     .terminal-header {
-
         height: 36px;
         min-height: 36px;
-
         display: flex;
-
         align-items: center;
         justify-content: space-between;
-
         padding: 0 10px;
-
         background: #252526;
-
-        border-bottom:
-            1px solid #333333;
-
+        border-bottom: 1px solid #333333;
+        user-select: none;
     }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | TITLE
-    |--------------------------------------------------------------------------
-    */
 
     .terminal-title {
-
         display: flex;
-
         align-items: center;
-
         gap: 8px;
-
-        font-family:
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 11px;
-
         font-weight: 600;
-
     }
-
 
     .terminal-icon {
-
         color: #4ec9b0;
-
         font-weight: 700;
-
     }
-
 
     .terminal-name {
-
         color: #cccccc;
-
     }
-
 
     .shell {
-
         color: #858585;
-
         font-size: 10px;
-
         font-weight: 400;
-
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | CLEAR BUTTON
-    |--------------------------------------------------------------------------
-    */
-
-    .clear-button {
-
-        border: none;
-
-        outline: none;
-
-        padding: 4px 8px;
-
-        background: transparent;
-
-        color: #858585;
-
-        cursor: pointer;
-
-        border-radius: 3px;
-
-        font-family:
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-
-        font-size: 11px;
-
+    .badge {
+        font-size: 10px;
+        font-weight: 400;
     }
 
-
-    .clear-button:hover {
-
-        color: #ffffff;
-
-        background: #3a3a3a;
-
+    .badge.exited {
+        color: #f48771;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | OUTPUT
-    |--------------------------------------------------------------------------
-    */
-
-    .terminal-output {
-
-        flex: 1;
-
-        min-height: 0;
-
-        overflow-y: auto;
-        overflow-x: hidden;
-
-        padding: 10px 12px;
-
-        background: #1e1e1e;
-
+    .badge.starting {
+        color: #e5e510;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | OUTPUT TEXT
-    |--------------------------------------------------------------------------
-    */
-
-    .terminal-output pre {
-
-        margin: 0;
-        padding: 0;
-
-        white-space: pre-wrap;
-
-        word-break: break-word;
-
-        line-height: 1.5;
-
-        color: #d4d4d4;
-
-        font-family:
-            Consolas,
-            "Cascadia Code",
-            "Courier New",
-            monospace;
-
-        font-size: 13px;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | WELCOME
-    |--------------------------------------------------------------------------
-    */
-
-    .welcome {
-
-        line-height: 1.6;
-
-    }
-
-
-    .welcome-title {
-
-        color: #cccccc;
-
-    }
-
-
-    .welcome-subtitle {
-
-        color: #569cd6;
-
-        font-size: 12px;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | INPUT
-    |--------------------------------------------------------------------------
-    */
-
-    .terminal-input {
-
-        height: 40px;
-        min-height: 40px;
-
+    .terminal-actions {
         display: flex;
-
         align-items: center;
-
-        padding: 0 12px;
-
-        background: #1e1e1e;
-
-        border-top:
-            1px solid #333333;
-
+        gap: 2px;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | PROMPT
-    |--------------------------------------------------------------------------
-    */
-
-    .prompt {
-
-        flex-shrink: 0;
-
-        margin-right: 8px;
-
-        color: #4ec9b0;
-
-        font-weight: 600;
-
-        user-select: none;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | INPUT FIELD
-    |--------------------------------------------------------------------------
-    */
-
-    .terminal-input input {
-
-        flex: 1;
-
-        min-width: 0;
-
-        width: 100%;
-        height: 100%;
-
-        margin: 0;
-        padding: 0;
-
+    .action-button {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         border: none;
         outline: none;
-
         background: transparent;
-
-        color: #cccccc;
-
-        caret-color: #ffffff;
-
-        font-family:
-            Consolas,
-            "Cascadia Code",
-            "Courier New",
-            monospace;
-
-        font-size: 13px;
-
-    }
-
-
-    .terminal-input input::placeholder {
-
-        color: #555555;
-
-    }
-
-
-    .terminal-input input:disabled {
-
-        opacity: 0.6;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | RUNNING
-    |--------------------------------------------------------------------------
-    */
-
-    .running {
-
-        flex-shrink: 0;
-
-        margin-left: 10px;
-
         color: #858585;
-
-        font-family:
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-
-        font-size: 11px;
-
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 14px;
+        padding: 0;
     }
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | SCROLLBAR
-    |--------------------------------------------------------------------------
-    */
-
-    .terminal-output::-webkit-scrollbar {
-
-        width: 8px;
-
+    .action-button:hover {
+        color: #ffffff;
+        background: #3a3a3a;
     }
 
+    .action-button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
 
-    .terminal-output::-webkit-scrollbar-track {
+    .action-button.kill:hover {
+        color: #f48771;
+        background: #3a3a3a;
+    }
 
+    .terminal-body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        padding: 4px 6px 0 6px;
         background: #1e1e1e;
-
     }
 
+    .terminal-body :global(.xterm) {
+        height: 100%;
+        padding: 2px 0;
+    }
 
-    .terminal-output::-webkit-scrollbar-thumb {
+    .terminal-body :global(.xterm-viewport) {
+        overflow-y: auto !important;
+        background-color: #1e1e1e !important;
+    }
 
+    .terminal-body :global(.xterm-viewport::-webkit-scrollbar) {
+        width: 8px;
+    }
+
+    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-track) {
+        background: #1e1e1e;
+    }
+
+    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-thumb) {
         background: #424242;
-
         border-radius: 4px;
-
     }
 
-
-    .terminal-output::-webkit-scrollbar-thumb:hover {
-
+    .terminal-body :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
         background: #555555;
-
     }
 
 </style>

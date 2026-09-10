@@ -11,6 +11,9 @@
     import Terminal
         from "./components/Terminal.svelte";
 
+    import { workspacePath }
+        from "./stores/workspace";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -72,7 +75,7 @@
             style={`height: ${terminalHeight}px`}
         >
 
-            <Terminal />
+            <Terminal cwd={$workspacePath ?? ""} />
 
         </section>
 

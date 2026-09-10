@@ -114,16 +114,178 @@ contextBridge.exposeInMainWorld(
 
         terminal: {
 
-            execute: (
-                command,
-                cwd
+            /*
+            |--------------------------------------------------------------------------
+            | Create Terminal
+            |--------------------------------------------------------------------------
+            */
+
+            create: (
+                cwd,
+                cols,
+                rows
             ) => {
 
                 return ipcRenderer.invoke(
-                    "terminal:execute",
-                    command,
-                    cwd
+                    "terminal:create",
+                    cwd,
+                    cols,
+                    rows
                 );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Write to Terminal
+            |--------------------------------------------------------------------------
+            */
+
+            write: (
+                terminalId,
+                data
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "terminal:write",
+                    terminalId,
+                    data
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Resize Terminal
+            |--------------------------------------------------------------------------
+            */
+
+            resize: (
+                terminalId,
+                cols,
+                rows
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "terminal:resize",
+                    terminalId,
+                    cols,
+                    rows
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Kill Terminal
+            |--------------------------------------------------------------------------
+            */
+
+            kill: (
+                terminalId
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "terminal:kill",
+                    terminalId
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Terminal Data Listener
+            |--------------------------------------------------------------------------
+            |
+            | Receives PTY output from the main process.
+            |
+            | Returns an unsubscribe function.
+            |
+            */
+
+            onData: (
+                callback
+            ) => {
+
+                const handler = (
+                    _event,
+                    terminalId,
+                    data
+                ) => {
+
+                    callback(
+                        terminalId,
+                        data
+                    );
+
+                };
+
+
+                ipcRenderer.on(
+                    "terminal:data",
+                    handler
+                );
+
+
+                return () => {
+
+                    ipcRenderer.removeListener(
+                        "terminal:data",
+                        handler
+                    );
+
+                };
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Terminal Exit Listener
+            |--------------------------------------------------------------------------
+            |
+            | Receives PTY exit events from the main process.
+            |
+            | Returns an unsubscribe function.
+            |
+            */
+
+            onExit: (
+                callback
+            ) => {
+
+                const handler = (
+                    _event,
+                    terminalId,
+                    exitCode
+                ) => {
+
+                    callback(
+                        terminalId,
+                        exitCode
+                    );
+
+                };
+
+
+                ipcRenderer.on(
+                    "terminal:exit",
+                    handler
+                );
+
+
+                return () => {
+
+                    ipcRenderer.removeListener(
+                        "terminal:exit",
+                        handler
+                    );
+
+                };
 
             }
 

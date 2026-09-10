@@ -7,7 +7,16 @@ const {
 
 const path = require("path");
 const fs = require("fs");
-const { exec } = require("child_process");
+
+
+/*
+|--------------------------------------------------------------------------
+| Terminal Manager
+|--------------------------------------------------------------------------
+*/
+
+const terminalManager =
+    require("./ipc/terminal.cjs");
 
 
 /*
@@ -48,9 +57,18 @@ function createWindow() {
 
     /*
     |--------------------------------------------------------------------------
-    | Development
+    | Initialize Terminal Manager
     |--------------------------------------------------------------------------
+    |
+    | Pass window reference so PTY output can be sent
+    | to the renderer via webContents.send().
+    |
     */
+
+    terminalManager.initialize(
+        window
+    );
+
 
     /*
     |--------------------------------------------------------------------------
@@ -91,7 +109,7 @@ function createWindow() {
     |--------------------------------------------------------------------------
     */
 
-    // window.webContents.openDevTools();
+    window.webContents.openDevTools();
 
 }
 
@@ -142,6 +160,15 @@ app.whenReady().then(() => {
 app.on(
     "window-all-closed",
     () => {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Kill all terminal processes
+        |--------------------------------------------------------------------------
+        */
+
+        terminalManager.killAll();
+
 
         if (
             process.platform !== "darwin"
@@ -415,154 +442,6 @@ ipcMain.handle(
             throw error;
 
         }
-
-    }
-);
-
-
-/*
-|--------------------------------------------------------------------------
-| TERMINAL
-|--------------------------------------------------------------------------
-*/
-
-
-/*
-|--------------------------------------------------------------------------
-| Execute Terminal Command
-|--------------------------------------------------------------------------
-|
-| This is the first/basic version.
-|
-| It executes the command using PowerShell.
-|
-*/
-
-ipcMain.handle(
-    "terminal:execute",
-
-    async (
-        _event,
-        command,
-        cwd
-    ) => {
-
-        console.log(
-            "[TERMINAL] Command:",
-            command
-        );
-
-
-        console.log(
-            "[TERMINAL] CWD:",
-            cwd
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Command
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            typeof command !==
-            "string"
-        ) {
-
-            throw new Error(
-                "Invalid terminal command."
-            );
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Working Directory
-        |--------------------------------------------------------------------------
-        */
-
-        let workingDirectory =
-            cwd;
-
-
-        if (
-            !workingDirectory ||
-            !fs.existsSync(
-                workingDirectory
-            )
-        ) {
-
-            workingDirectory =
-                process.cwd();
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Execute
-        |--------------------------------------------------------------------------
-        */
-
-        return new Promise(
-            (resolve) => {
-
-                exec(
-                    command,
-
-                    {
-
-                        cwd:
-                            workingDirectory,
-
-                        shell:
-                            "powershell.exe",
-
-                        windowsHide:
-                            true,
-
-                        maxBuffer:
-                            10 * 1024 * 1024
-
-                    },
-
-                    (
-                        error,
-                        stdout,
-                        stderr
-                    ) => {
-
-                        const exitCode =
-                            error
-                                ? (
-                                    typeof error.code ===
-                                        "number"
-                                        ? error.code
-                                        : 1
-                                )
-                                : 0;
-
-
-                        resolve({
-
-                            stdout:
-                                stdout || "",
-
-                            stderr:
-                                stderr || "",
-
-                            exitCode
-
-                        });
-
-                    }
-
-                );
-
-            }
-        );
 
     }
 );
