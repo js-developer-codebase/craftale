@@ -21,7 +21,8 @@
         saveFile,
         activateFile,
         closeFile,
-        toggleTerminal
+        toggleTerminal,
+        pathsEqual
     } from "../stores/workspace";
 
 
@@ -325,6 +326,7 @@
 
 
         const path =
+            $activeFile?.path ||
             model.uri.fsPath;
 
 
@@ -367,7 +369,7 @@
         ) {
 
             console.log(
-                "[EDITOR] Saved:",
+                "[EDITOR] Saved successfully:",
                 path
             );
 
@@ -427,10 +429,8 @@
         const file =
             $openedFiles.find(
                 (item) =>
-                    normalizePath(
-                        item.path
-                    ) ===
-                    normalizePath(
+                    pathsEqual(
+                        item.path,
                         filePath
                     )
             );
@@ -758,6 +758,21 @@
 
             /*
             |--------------------------------------------------------------------------
+            | Ctrl + S Save Command
+            |--------------------------------------------------------------------------
+            */
+
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd |
+                monaco.KeyCode.KeyS,
+                () => {
+                    void saveCurrentFile();
+                }
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Content Changed
             |--------------------------------------------------------------------------
             */
@@ -789,6 +804,7 @@
 
 
                         const path =
+                            $activeFile?.path ||
                             model.uri.fsPath;
 
 
@@ -971,24 +987,15 @@
                 </span>
 
 
-                {#if file.isDirty}
-
-                    <span
-                        class="dirty"
-                        title="Unsaved changes"
-                    >
-
-                        ●
-
-                    </span>
-
-                {/if}
-
-
                 <button
                     type="button"
-                    class="close"
-                    title="Close"
+                    class="tab-close"
+                    class:is-dirty={file.isDirty}
+                    title={
+                        file.isDirty
+                            ? "Unsaved changes (Click to close)"
+                            : "Close"
+                    }
                     aria-label={
                         `Close ${file.name}`
                     }
@@ -1000,7 +1007,17 @@
                     }
                 >
 
-                    ×
+                    {#if file.isDirty}
+
+                        <span class="dirty-indicator">
+                            ●
+                        </span>
+
+                    {/if}
+
+                    <span class="close-icon">
+                        ×
+                    </span>
 
                 </button>
 
@@ -1052,10 +1069,8 @@
             ? (
                 $openedFiles.find(
                     (file) =>
-                        normalizePath(
-                            file.path
-                        ) ===
-                        normalizePath(
+                        pathsEqual(
+                            file.path,
                             filePendingClose!
                         )
                 )?.name ?? ""
@@ -1251,40 +1266,17 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Dirty Indicator
+    | Tab Close Button & Dirty Indicator (VS Code Style)
     |--------------------------------------------------------------------------
     */
 
-    .dirty {
-
-        color:
-            #ffffff;
-
-        font-size:
-            10px;
-
-        line-height:
-            1;
-
-        flex-shrink:
-            0;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Close Button
-    |--------------------------------------------------------------------------
-    */
-
-    .close {
+    .tab-close {
 
         width:
-            22px;
+            20px;
 
         height:
-            22px;
+            20px;
 
         display:
             flex;
@@ -1298,6 +1290,9 @@
         border:
             none;
 
+        border-radius:
+            3px;
+
         background:
             transparent;
 
@@ -1305,7 +1300,7 @@
             #858585;
 
         font-size:
-            16px;
+            14px;
 
         cursor:
             pointer;
@@ -1313,19 +1308,78 @@
         padding:
             0;
 
+        margin-left:
+            4px;
+
         flex-shrink:
             0;
+
+        position:
+            relative;
 
     }
 
 
-    .close:hover {
+    .tab-close:hover {
 
         background:
-            #333333;
+            #3a3a3a;
 
         color:
             #ffffff;
+
+    }
+
+
+    .dirty-indicator {
+
+        font-size:
+            10px;
+
+        color:
+            #ffffff;
+
+        display:
+            block;
+
+    }
+
+
+    .close-icon {
+
+        font-size:
+            14px;
+
+        line-height:
+            1;
+
+        display:
+            block;
+
+    }
+
+
+    /* When file is dirty: show dot by default; when hovering the tab, show × */
+    .tab-close.is-dirty .close-icon {
+
+        display:
+            none;
+
+    }
+
+
+    .tab:hover .tab-close.is-dirty .dirty-indicator {
+
+        display:
+            none;
+
+    }
+
+
+    .tab:hover .tab-close.is-dirty .close-icon {
+
+        display:
+            block;
 
     }
 

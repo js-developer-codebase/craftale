@@ -22,6 +22,32 @@ export type OpenFile = {
 
 /*
 |--------------------------------------------------------------------------
+| Normalize & Compare Paths (Cross-Platform / Windows Safe)
+|--------------------------------------------------------------------------
+*/
+
+export function pathsEqual(
+    a: string | null | undefined,
+    b: string | null | undefined
+): boolean {
+
+    if (!a || !b) {
+
+        return false;
+
+    }
+
+
+    return (
+        a.replace(/\\/g, "/").toLowerCase() ===
+        b.replace(/\\/g, "/").toLowerCase()
+    );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Active File
 |--------------------------------------------------------------------------
 */
@@ -127,7 +153,10 @@ export function openFile(
             const exists =
                 files.some(
                     item =>
-                        item.path === file.path
+                        pathsEqual(
+                            item.path,
+                            file.path
+                        )
                 );
 
 
@@ -174,7 +203,10 @@ export function activateFile(
             const file =
                 files.find(
                     item =>
-                        item.path === path
+                        pathsEqual(
+                            item.path,
+                            path
+                        )
                 );
 
 
@@ -182,7 +214,7 @@ export function activateFile(
 
                 activeFile.set(file);
 
-                activePath.set(path);
+                activePath.set(file.path);
 
             }
 
@@ -219,7 +251,7 @@ export function updateFileContent(
                 file => {
 
                     if (
-                        file.path !== path
+                        !pathsEqual(file.path, path)
                     ) {
 
                         return file;
@@ -249,7 +281,7 @@ export function updateFileContent(
 
             if (
                 !file ||
-                file.path !== path
+                !pathsEqual(file.path, path)
             ) {
 
                 return file;
@@ -291,7 +323,7 @@ export function markFileSaved(
                 file => {
 
                     if (
-                        file.path !== path
+                        !pathsEqual(file.path, path)
                     ) {
 
                         return file;
@@ -321,7 +353,7 @@ export function markFileSaved(
 
             if (
                 !file ||
-                file.path !== path
+                !pathsEqual(file.path, path)
             ) {
 
                 return file;
@@ -362,7 +394,7 @@ export async function saveFile(
     const file =
         files.find(
             item =>
-                item.path === path
+                pathsEqual(item.path, path)
         );
 
 
@@ -384,20 +416,20 @@ export async function saveFile(
             .craftale
             .filesystem
             .writeFile(
-                path,
+                file.path,
                 file.content
             );
 
 
         markFileSaved(
-            path,
+            file.path,
             file.content
         );
 
 
         console.log(
             "[STORE] File saved:",
-            path
+            file.path
         );
 
 
@@ -435,7 +467,7 @@ export function closeFile(
             const index =
                 files.findIndex(
                     file =>
-                        file.path === path
+                        pathsEqual(file.path, path)
                 );
 
 
@@ -449,7 +481,7 @@ export function closeFile(
             const newFiles =
                 files.filter(
                     file =>
-                        file.path !== path
+                        !pathsEqual(file.path, path)
                 );
 
 
@@ -463,7 +495,7 @@ export function closeFile(
                 currentPath => {
 
                     if (
-                        currentPath !== path
+                        !pathsEqual(currentPath, path)
                     ) {
 
                         return currentPath;
