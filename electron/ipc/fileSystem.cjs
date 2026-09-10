@@ -4,8 +4,108 @@ const {
 } = require("electron");
 
 const fs = require("fs/promises");
-
 const path = require("path");
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper: Check if Path Exists
+|--------------------------------------------------------------------------
+*/
+
+async function pathExists(targetPath) {
+
+    try {
+
+        await fs.access(targetPath);
+
+        return true;
+
+    } catch {
+
+        return false;
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper: Generate Unique Copy Name
+|--------------------------------------------------------------------------
+*/
+
+async function getUniqueCopyPath(sourcePath) {
+
+    const dir = path.dirname(sourcePath);
+
+    const ext = path.extname(sourcePath);
+
+    const baseName = path.basename(sourcePath, ext);
+
+    let counter = 1;
+
+    let candidateName = `${baseName} (copy)${ext}`;
+
+    let candidatePath = path.join(dir, candidateName);
+
+
+    while (await pathExists(candidatePath)) {
+
+        counter++;
+
+        candidateName = `${baseName} (copy ${counter})${ext}`;
+
+        candidatePath = path.join(dir, candidateName);
+
+    }
+
+
+    return {
+        path: candidatePath,
+        name: candidateName
+    };
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper: Generate Unique Numbered Name (For Keep Both)
+|--------------------------------------------------------------------------
+*/
+
+async function getUniqueNumberedPath(destDir, originalName) {
+
+    const ext = path.extname(originalName);
+
+    const baseName = path.basename(originalName, ext);
+
+    let counter = 1;
+
+    let candidateName = `${baseName} (${counter})${ext}`;
+
+    let candidatePath = path.join(destDir, candidateName);
+
+
+    while (await pathExists(candidatePath)) {
+
+        counter++;
+
+        candidateName = `${baseName} (${counter})${ext}`;
+
+        candidatePath = path.join(destDir, candidateName);
+
+    }
+
+
+    return {
+        path: candidatePath,
+        name: candidateName
+    };
+
+}
 
 
 /*
@@ -84,12 +184,6 @@ ipcMain.handle(
 
         try {
 
-            console.log(
-                "[FS] Reading:",
-                directoryPath
-            );
-
-
             const entries =
                 await fs.readdir(
                     directoryPath,
@@ -130,7 +224,7 @@ ipcMain.handle(
             | Sort
             |--------------------------------------------------------------------------
             |
-            | Directories first, files second.
+            | Directories first, files second (case-insensitive alphabetical).
             |
             */
 
@@ -150,18 +244,13 @@ ipcMain.handle(
                     }
 
 
-                    return a.name.localeCompare(
-                        b.name
-                    );
+                    return a.name
+                        .toLowerCase()
+                        .localeCompare(
+                            b.name.toLowerCase()
+                        );
 
                 }
-            );
-
-
-            console.log(
-                "[FS] Found",
-                items.length,
-                "items"
             );
 
 
@@ -173,7 +262,6 @@ ipcMain.handle(
                 "[FS] Failed to read directory:",
                 error
             );
-
 
             throw error;
 
@@ -196,12 +284,6 @@ ipcMain.handle(
         filePath
     ) => {
 
-        console.log(
-            "[IPC] read-file:",
-            filePath
-        );
-
-
         try {
 
             const content =
@@ -209,13 +291,6 @@ ipcMain.handle(
                     filePath,
                     "utf-8"
                 );
-
-
-            console.log(
-                "[FS] File read:",
-                filePath
-            );
-
 
             return content;
 
@@ -225,7 +300,6 @@ ipcMain.handle(
                 "[FS] Failed to read file:",
                 error
             );
-
 
             throw error;
 
@@ -249,12 +323,6 @@ ipcMain.handle(
         content
     ) => {
 
-        console.log(
-            "[IPC] write-file:",
-            filePath
-        );
-
-
         try {
 
             await fs.writeFile(
@@ -262,13 +330,6 @@ ipcMain.handle(
                 content,
                 "utf-8"
             );
-
-
-            console.log(
-                "[FS] File saved:",
-                filePath
-            );
-
 
             return true;
 
@@ -279,6 +340,78 @@ ipcMain.handle(
                 error
             );
 
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Create File
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:create-file",
+    async (
+        event,
+        parentPath,
+        fileName
+    ) => {
+
+        console.log(
+            "[IPC] create-file:",
+            parentPath,
+            fileName
+        );
+
+
+        try {
+
+            const targetPath =
+                path.join(
+                    parentPath,
+                    fileName
+                );
+
+
+            const exists =
+                await pathExists(
+                    targetPath
+                );
+
+
+            if (exists) {
+
+                throw new Error(
+                    `File "${fileName}" already exists.`
+                );
+
+            }
+
+
+            await fs.writeFile(
+                targetPath,
+                "",
+                "utf-8"
+            );
+
+
+            return {
+                name: fileName,
+                path: targetPath,
+                type: "file"
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Create file failed:",
+                error
+            );
 
             throw error;
 
@@ -286,3 +419,572 @@ ipcMain.handle(
 
     }
 );
+
+
+/*
+|--------------------------------------------------------------------------
+| Create Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:create-folder",
+    async (
+        event,
+        parentPath,
+        folderName
+    ) => {
+
+        console.log(
+            "[IPC] create-folder:",
+            parentPath,
+            folderName
+        );
+
+
+        try {
+
+            const targetPath =
+                path.join(
+                    parentPath,
+                    folderName
+                );
+
+
+            const exists =
+                await pathExists(
+                    targetPath
+                );
+
+
+            if (exists) {
+
+                throw new Error(
+                    `Folder "${folderName}" already exists.`
+                );
+
+            }
+
+
+            await fs.mkdir(
+                targetPath,
+                {
+                    recursive: true
+                }
+            );
+
+
+            return {
+                name: folderName,
+                path: targetPath,
+                type: "directory"
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Create folder failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Rename File or Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:rename",
+    async (
+        event,
+        oldPath,
+        newName
+    ) => {
+
+        console.log(
+            "[IPC] rename:",
+            oldPath,
+            newName
+        );
+
+
+        try {
+
+            const parentDir =
+                path.dirname(oldPath);
+
+            const newPath =
+                path.join(
+                    parentDir,
+                    newName
+                );
+
+
+            if (oldPath === newPath) {
+
+                return {
+                    oldPath,
+                    newPath,
+                    newName
+                };
+
+            }
+
+
+            const exists =
+                await pathExists(newPath);
+
+            if (exists) {
+
+                throw new Error(
+                    `An item named "${newName}" already exists in this folder.`
+                );
+
+            }
+
+
+            await fs.rename(
+                oldPath,
+                newPath
+            );
+
+
+            return {
+                oldPath,
+                newPath,
+                newName
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Rename failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Delete File or Folder (Recursive)
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:delete",
+    async (
+        event,
+        targetPath,
+        isDirectory
+    ) => {
+
+        console.log(
+            "[IPC] delete:",
+            targetPath,
+            "isDirectory:",
+            isDirectory
+        );
+
+
+        try {
+
+            await fs.rm(
+                targetPath,
+                {
+                    recursive: true,
+                    force: true
+                }
+            );
+
+
+            return {
+                success: true,
+                deletedPath: targetPath
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Delete failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Exists
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:exists",
+    async (
+        event,
+        targetPath
+    ) => {
+
+        return await pathExists(targetPath);
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Copy File or Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:copy",
+    async (
+        event,
+        srcPath,
+        destDir,
+        options = {}
+    ) => {
+
+        const {
+            overwrite = false,
+            keepBoth = false
+        } = options;
+
+
+        console.log(
+            "[IPC] copy:",
+            srcPath,
+            "->",
+            destDir,
+            options
+        );
+
+
+        try {
+
+            const originalName =
+                path.basename(srcPath);
+
+            let destPath =
+                path.join(destDir, originalName);
+
+
+            if (keepBoth) {
+
+                const unique =
+                    await getUniqueNumberedPath(
+                        destDir,
+                        originalName
+                    );
+
+                destPath = unique.path;
+
+            } else if (!overwrite) {
+
+                const exists =
+                    await pathExists(destPath);
+
+                if (exists) {
+
+                    return {
+                        conflict: true,
+                        existingName: originalName,
+                        destPath
+                    };
+
+                }
+
+            }
+
+
+            await fs.cp(
+                srcPath,
+                destPath,
+                {
+                    recursive: true,
+                    force: true
+                }
+            );
+
+
+            return {
+                success: true,
+                targetPath: destPath,
+                name: path.basename(destPath)
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Copy failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Move File or Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:move",
+    async (
+        event,
+        srcPath,
+        destDir,
+        options = {}
+    ) => {
+
+        const {
+            overwrite = false,
+            keepBoth = false
+        } = options;
+
+
+        console.log(
+            "[IPC] move:",
+            srcPath,
+            "->",
+            destDir,
+            options
+        );
+
+
+        try {
+
+            const originalName =
+                path.basename(srcPath);
+
+            let destPath =
+                path.join(destDir, originalName);
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Prevent Moving Into Same Location
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                path.resolve(srcPath).toLowerCase() ===
+                path.resolve(destPath).toLowerCase()
+            ) {
+
+                return {
+                    success: true,
+                    targetPath: srcPath,
+                    name: originalName
+                };
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Conflict Check
+            |--------------------------------------------------------------------------
+            */
+
+            if (keepBoth) {
+
+                const unique =
+                    await getUniqueNumberedPath(
+                        destDir,
+                        originalName
+                    );
+
+                destPath = unique.path;
+
+            } else if (!overwrite) {
+
+                const exists =
+                    await pathExists(destPath);
+
+                if (exists) {
+
+                    return {
+                        conflict: true,
+                        existingName: originalName,
+                        destPath
+                    };
+
+                }
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | If Overwriting Existing Destination
+            |--------------------------------------------------------------------------
+            */
+
+            if (overwrite) {
+
+                const exists =
+                    await pathExists(destPath);
+
+                if (exists) {
+
+                    await fs.rm(
+                        destPath,
+                        {
+                            recursive: true,
+                            force: true
+                        }
+                    );
+
+                }
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Rename with Cross-Device Fallback
+            |--------------------------------------------------------------------------
+            */
+
+            try {
+
+                await fs.rename(
+                    srcPath,
+                    destPath
+                );
+
+            } catch (err) {
+
+                if (err.code === "EXDEV") {
+
+                    await fs.cp(
+                        srcPath,
+                        destPath,
+                        {
+                            recursive: true
+                        }
+                    );
+
+                    await fs.rm(
+                        srcPath,
+                        {
+                            recursive: true,
+                            force: true
+                        }
+                    );
+
+                } else {
+
+                    throw err;
+
+                }
+
+            }
+
+
+            return {
+                success: true,
+                targetPath: destPath,
+                name: path.basename(destPath)
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Move failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Duplicate File or Folder
+|--------------------------------------------------------------------------
+*/
+
+ipcMain.handle(
+    "filesystem:duplicate",
+    async (
+        event,
+        srcPath
+    ) => {
+
+        console.log(
+            "[IPC] duplicate:",
+            srcPath
+        );
+
+
+        try {
+
+            const unique =
+                await getUniqueCopyPath(
+                    srcPath
+                );
+
+
+            await fs.cp(
+                srcPath,
+                unique.path,
+                {
+                    recursive: true
+                }
+            );
+
+
+            return {
+                success: true,
+                targetPath: unique.path,
+                name: unique.name
+            };
+
+        } catch (error) {
+
+            console.error(
+                "[FS] Duplicate failed:",
+                error
+            );
+
+            throw error;
+
+        }
+
+    }
+);
+
+
+module.exports = {};

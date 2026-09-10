@@ -101,6 +101,166 @@ contextBridge.exposeInMainWorld(
                     content
                 );
 
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Create File
+            |--------------------------------------------------------------------------
+            */
+
+            createFile: (
+                parentPath,
+                fileName
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:create-file",
+                    parentPath,
+                    fileName
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Create Folder
+            |--------------------------------------------------------------------------
+            */
+
+            createFolder: (
+                parentPath,
+                folderName
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:create-folder",
+                    parentPath,
+                    folderName
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Rename
+            |--------------------------------------------------------------------------
+            */
+
+            rename: (
+                oldPath,
+                newName
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:rename",
+                    oldPath,
+                    newName
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Delete
+            |--------------------------------------------------------------------------
+            */
+
+            delete: (
+                targetPath,
+                isDirectory
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:delete",
+                    targetPath,
+                    isDirectory
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Exists
+            |--------------------------------------------------------------------------
+            */
+
+            exists: (
+                targetPath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:exists",
+                    targetPath
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Copy
+            |--------------------------------------------------------------------------
+            */
+
+            copy: (
+                srcPath,
+                destDir,
+                options
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:copy",
+                    srcPath,
+                    destDir,
+                    options
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Move
+            |--------------------------------------------------------------------------
+            */
+
+            move: (
+                srcPath,
+                destDir,
+                options
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:move",
+                    srcPath,
+                    destDir,
+                    options
+                );
+
+            },
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Duplicate
+            |--------------------------------------------------------------------------
+            */
+
+            duplicate: (
+                srcPath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "filesystem:duplicate",
+                    srcPath
+                );
+
             }
 
         },

@@ -683,6 +683,9 @@
     let activeFileUnsubscribe:
         () => void;
 
+    let openedFilesUnsubscribe:
+        () => void;
+
 
     /*
     |--------------------------------------------------------------------------
@@ -860,6 +863,44 @@
 
             /*
             |--------------------------------------------------------------------------
+            | Clean Up Closed / Renamed Models
+            |--------------------------------------------------------------------------
+            */
+
+            openedFilesUnsubscribe =
+                openedFiles.subscribe(
+                    (files) => {
+
+                        const currentKeys =
+                            new Set(
+                                files.map(
+                                    (f) =>
+                                        normalizePath(f.path)
+                                )
+                            );
+
+
+                        for (
+                            const [key, model]
+                            of models.entries()
+                        ) {
+
+                            if (!currentKeys.has(key)) {
+
+                                model.dispose();
+
+                                models.delete(key);
+
+                            }
+
+                        }
+
+                    }
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Keyboard
             |--------------------------------------------------------------------------
             */
@@ -892,6 +933,8 @@
 
 
             activeFileUnsubscribe?.();
+
+            openedFilesUnsubscribe?.();
 
 
             for (

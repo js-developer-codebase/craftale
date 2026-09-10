@@ -537,3 +537,326 @@ export function closeFile(
     );
 
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| Tree Refresh Trigger
+|--------------------------------------------------------------------------
+*/
+
+export const treeRefreshTrigger =
+    writable<number>(0);
+
+
+export function triggerTreeRefresh() {
+
+    treeRefreshTrigger.update(
+        (n) => n + 1
+    );
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Clipboard
+|--------------------------------------------------------------------------
+*/
+
+export type ClipboardItem = {
+
+    path: string;
+
+    name: string;
+
+    type: "file" | "directory";
+
+    operation: "copy" | "cut";
+
+};
+
+
+export const clipboard =
+    writable<ClipboardItem | null>(null);
+
+
+export function copyToClipboard(
+    path: string,
+    name: string,
+    type: "file" | "directory"
+) {
+
+    clipboard.set({
+        path,
+        name,
+        type,
+        operation: "copy"
+    });
+
+}
+
+
+export function cutToClipboard(
+    path: string,
+    name: string,
+    type: "file" | "directory"
+) {
+
+    clipboard.set({
+        path,
+        name,
+        type,
+        operation: "cut"
+    });
+
+}
+
+
+export function clearClipboard() {
+
+    clipboard.set(null);
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Rename File / Folder in Store
+|--------------------------------------------------------------------------
+*/
+
+export function renameFileInStore(
+    oldPath: string,
+    newPath: string,
+    newName: string
+) {
+
+    const normOld =
+        oldPath.replace(/\\/g, "/").toLowerCase();
+
+    openedFiles.update((files) => {
+
+        return files.map((file) => {
+
+            const normFile =
+                file.path.replace(/\\/g, "/").toLowerCase();
+
+
+            if (normFile === normOld) {
+
+                return {
+                    ...file,
+                    path: newPath,
+                    name: newName
+                };
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Handle Children of Renamed Folder
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                normFile.startsWith(normOld + "/")
+            ) {
+
+                const subPath =
+                    file.path.slice(oldPath.length);
+
+                const updatedPath =
+                    newPath + subPath;
+
+                return {
+                    ...file,
+                    path: updatedPath
+                };
+
+            }
+
+
+            return file;
+
+        });
+
+    });
+
+
+    activeFile.update((curr) => {
+
+        if (!curr) {
+            return null;
+        }
+
+
+        const normCurr =
+            curr.path.replace(/\\/g, "/").toLowerCase();
+
+
+        if (normCurr === normOld) {
+
+            return {
+                ...curr,
+                path: newPath,
+                name: newName
+            };
+
+        }
+
+
+        if (
+            normCurr.startsWith(normOld + "/")
+        ) {
+
+            const subPath =
+                curr.path.slice(oldPath.length);
+
+            return {
+                ...curr,
+                path: newPath + subPath
+            };
+
+        }
+
+
+        return curr;
+
+    });
+
+
+    activePath.update((currPath) => {
+
+        if (!currPath) {
+            return null;
+        }
+
+
+        const normCurr =
+            currPath.replace(/\\/g, "/").toLowerCase();
+
+
+        if (normCurr === normOld) {
+
+            return newPath;
+
+        }
+
+
+        if (
+            normCurr.startsWith(normOld + "/")
+        ) {
+
+            const subPath =
+                currPath.slice(oldPath.length);
+
+            return newPath + subPath;
+
+        }
+
+
+        return currPath;
+
+    });
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Delete File / Folder in Store
+|--------------------------------------------------------------------------
+*/
+
+export function deleteFileInStore(
+    deletedPath: string
+) {
+
+    const normDeleted =
+        deletedPath.replace(/\\/g, "/").toLowerCase();
+
+
+    openedFiles.update((files) => {
+
+        return files.filter((file) => {
+
+            const normFile =
+                file.path.replace(/\\/g, "/").toLowerCase();
+
+
+            const isMatch =
+                normFile === normDeleted ||
+                normFile.startsWith(normDeleted + "/");
+
+
+            return !isMatch;
+
+        });
+
+    });
+
+
+    activeFile.update((curr) => {
+
+        if (!curr) {
+            return null;
+        }
+
+
+        const normCurr =
+            curr.path.replace(/\\/g, "/").toLowerCase();
+
+
+        if (
+            normCurr === normDeleted ||
+            normCurr.startsWith(normDeleted + "/")
+        ) {
+
+            const remaining =
+                get(openedFiles);
+
+            return remaining.length > 0
+                ? remaining[remaining.length - 1]
+                : null;
+
+        }
+
+
+        return curr;
+
+    });
+
+
+    activePath.update((currPath) => {
+
+        if (!currPath) {
+            return null;
+        }
+
+
+        const normCurr =
+            currPath.replace(/\\/g, "/").toLowerCase();
+
+
+        if (
+            normCurr === normDeleted ||
+            normCurr.startsWith(normDeleted + "/")
+        ) {
+
+            const remaining =
+                get(openedFiles);
+
+            return remaining.length > 0
+                ? remaining[remaining.length - 1].path
+                : null;
+
+        }
+
+
+        return currPath;
+
+    });
+
+}

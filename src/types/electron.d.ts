@@ -56,9 +56,95 @@ declare global {
 
                 writeFile(
                     filePath: string,
-
                     content: string
                 ): Promise<boolean>;
+
+
+                createFile(
+                    parentPath: string,
+                    fileName: string
+                ): Promise<{
+                    name: string;
+                    path: string;
+                    type: "file";
+                }>;
+
+
+                createFolder(
+                    parentPath: string,
+                    folderName: string
+                ): Promise<{
+                    name: string;
+                    path: string;
+                    type: "directory";
+                }>;
+
+
+                rename(
+                    oldPath: string,
+                    newName: string
+                ): Promise<{
+                    oldPath: string;
+                    newPath: string;
+                    newName: string;
+                }>;
+
+
+                delete(
+                    targetPath: string,
+                    isDirectory: boolean
+                ): Promise<{
+                    success: boolean;
+                    deletedPath: string;
+                }>;
+
+
+                exists(
+                    targetPath: string
+                ): Promise<boolean>;
+
+
+                copy(
+                    srcPath: string,
+                    destDir: string,
+                    options?: {
+                        overwrite?: boolean;
+                        keepBoth?: boolean;
+                    }
+                ): Promise<{
+                    success?: boolean;
+                    conflict?: boolean;
+                    existingName?: string;
+                    destPath?: string;
+                    targetPath?: string;
+                    name?: string;
+                }>;
+
+
+                move(
+                    srcPath: string,
+                    destDir: string,
+                    options?: {
+                        overwrite?: boolean;
+                        keepBoth?: boolean;
+                    }
+                ): Promise<{
+                    success?: boolean;
+                    conflict?: boolean;
+                    existingName?: string;
+                    destPath?: string;
+                    targetPath?: string;
+                    name?: string;
+                }>;
+
+
+                duplicate(
+                    srcPath: string
+                ): Promise<{
+                    success: boolean;
+                    targetPath: string;
+                    name: string;
+                }>;
 
             };
 

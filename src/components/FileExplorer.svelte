@@ -1,45 +1,113 @@
 <script lang="ts">
 
+    import { onMount, onDestroy } from "svelte";
+    import FileTreeItem, { type FileItem } from "./FileTreeItem.svelte";
+    import ContextMenu from "./ContextMenu.svelte";
+    import ConfirmModal from "./ConfirmModal.svelte";
+    import ConflictModal from "./ConflictModal.svelte";
     import {
-        onMount
-    } from "svelte";
-
-
-    import FileTreeItem
-        from "./FileTreeItem.svelte";
-
-    import {
-        setWorkspace
+        setWorkspace,
+        openedFiles,
+        saveFile,
+        openFile,
+        renameFileInStore,
+        deleteFileInStore,
+        clipboard,
+        copyToClipboard,
+        cutToClipboard,
+        clearClipboard,
+        treeRefreshTrigger,
+        pathsEqual
     } from "../stores/workspace";
 
 
-    type FileItem = {
+    /*
+    |--------------------------------------------------------------------------
+    | Explorer State
+    |--------------------------------------------------------------------------
+    */
 
+    let rootPath = $state<string | null>(null);
+
+    let rootItems = $state<FileItem[]>([]);
+
+    let loading = $state(false);
+
+    let error = $state<string | null>(null);
+
+    let refreshKey = $state(0);
+
+    let explorerContainer = $state<HTMLDivElement | null>(null);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Selection & Editing State
+    |--------------------------------------------------------------------------
+    */
+
+    let selectedItem = $state<FileItem | null>(null);
+
+    let renamingPath = $state<string | null>(null);
+
+    let creatingUnderPath = $state<string | null>(null);
+
+    let creatingType = $state<"file" | "directory" | null>(null);
+
+    let createRootValue = $state("");
+
+    let createRootInputEl = $state<HTMLInputElement | null>(null);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Context Menu State
+    |--------------------------------------------------------------------------
+    */
+
+    let contextMenu = $state({
+        visible: false,
+        x: 0,
+        y: 0,
+        item: null as FileItem | null
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deletion Modal State
+    |--------------------------------------------------------------------------
+    */
+
+    let showDeleteModal = $state(false);
+
+    let itemToDelete = $state<FileItem | null>(null);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Conflict Modal State
+    |--------------------------------------------------------------------------
+    */
+
+    let showConflictModal = $state(false);
+
+    let conflictState = $state<{
+        srcPath: string;
+        destDir: string;
         name: string;
-
-        path: string;
-
-        type:
-            | "file"
-            | "directory";
-
-    };
+        operation: "copy" | "move";
+        isCut?: boolean;
+    } | null>(null);
 
 
-    let rootPath =
-        $state<string | null>(null);
+    /*
+    |--------------------------------------------------------------------------
+    | Root Drag Over
+    |--------------------------------------------------------------------------
+    */
 
-
-    let rootItems =
-        $state<FileItem[]>([]);
-
-
-    let loading =
-        $state(false);
-
-
-    let error =
-        $state<string | null>(null);
+    let isRootDragOver = $state(false);
 
 
     /*
@@ -48,47 +116,50 @@
     |--------------------------------------------------------------------------
     */
 
-    async function loadFolder(
-        folderPath: string
-    ) {
+    async function loadFolder(folderPath: string) {
 
         loading = true;
 
         error = null;
 
-
         try {
 
-            rootItems =
-                await window
-                    .craftale
-                    .filesystem
-                    .readDirectory(
-                        folderPath
-                    );
-
+            rootItems = await window.craftale.filesystem.readDirectory(folderPath);
 
             rootPath = folderPath;
 
-            setWorkspace(
-                folderPath
-            );
+            setWorkspace(folderPath);
 
+            refreshKey++;
 
         } catch (err) {
 
-            console.error(
-                "Failed to load folder:",
-                err
-            );
+            console.error("Failed to load folder:", err);
 
-
-            error =
-                "Unable to load folder.";
+            error = "Unable to load folder.";
 
         } finally {
 
             loading = false;
+
+        }
+
+    }
+
+
+    async function refreshExplorer() {
+
+        if (!rootPath) return;
+
+        try {
+
+            rootItems = await window.craftale.filesystem.readDirectory(rootPath);
+
+            refreshKey++;
+
+        } catch (err) {
+
+            console.error("Failed to refresh folder:", err);
 
         }
 
@@ -105,30 +176,15 @@
 
         try {
 
-            const folder =
-                await window
-                    .craftale
-                    .filesystem
-                    .selectFolder();
+            const folder = await window.craftale.filesystem.selectFolder();
 
+            if (!folder) return;
 
-            if (!folder) {
-
-                return;
-
-            }
-
-
-            await loadFolder(
-                folder
-            );
+            await loadFolder(folder);
 
         } catch (err) {
 
-            console.error(
-                "Folder selection failed:",
-                err
-            );
+            console.error("Folder selection failed:", err);
 
         }
 
@@ -137,101 +193,960 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Initial Folder
+    | Create Actions
     |--------------------------------------------------------------------------
     */
 
+    function startCreate(type: "file" | "directory", parentPath?: string) {
+
+        const targetParent =
+            parentPath ||
+            (selectedItem?.type === "directory"
+                ? selectedItem.path
+                : selectedItem?.type === "file"
+                    ? getParentDir(selectedItem.path)
+                    : rootPath);
+
+        if (!targetParent) return;
+
+        creatingUnderPath = targetParent;
+
+        creatingType = type;
+
+        createRootValue = "";
+
+        if (pathsEqual(targetParent, rootPath)) {
+
+            setTimeout(() => {
+
+                createRootInputEl?.focus();
+
+            }, 30);
+
+        }
+
+    }
+
+
+    function getParentDir(filePath: string): string {
+
+        const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+
+        return lastSlash > 0 ? filePath.slice(0, lastSlash) : filePath;
+
+    }
+
+
+    async function handleCreateSubmit(parentPath: string, name: string, type: "file" | "directory") {
+
+        creatingUnderPath = null;
+
+        creatingType = null;
+
+        try {
+
+            if (type === "file") {
+
+                const res = await window.craftale.filesystem.createFile(parentPath, name);
+
+                await refreshExplorer();
+
+                /* Automatically open created file */
+
+                openFile({
+                    name: res.name,
+                    path: res.path,
+                    content: ""
+                });
+
+                selectedItem = {
+                    name: res.name,
+                    path: res.path,
+                    type: "file"
+                };
+
+            } else {
+
+                const res = await window.craftale.filesystem.createFolder(parentPath, name);
+
+                await refreshExplorer();
+
+                selectedItem = {
+                    name: res.name,
+                    path: res.path,
+                    type: "directory"
+                };
+
+            }
+
+        } catch (err: any) {
+
+            console.error("Create failed:", err);
+
+            alert(err?.message || "Failed to create item.");
+
+        }
+
+    }
+
+
+    function handleCreateCancel() {
+
+        creatingUnderPath = null;
+
+        creatingType = null;
+
+    }
+
+
+    function handleRootCreateKeydown(event: KeyboardEvent) {
+
+        if (event.key === "Enter") {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            const trimmed = createRootValue.trim();
+
+            if (trimmed && rootPath && creatingType) {
+
+                handleCreateSubmit(rootPath, trimmed, creatingType);
+
+            } else {
+
+                handleCreateCancel();
+
+            }
+
+        } else if (event.key === "Escape") {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            handleCreateCancel();
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rename Actions
+    |--------------------------------------------------------------------------
+    */
+
+    function startRename(item?: FileItem) {
+
+        const target = item || selectedItem;
+
+        if (!target) return;
+
+        renamingPath = target.path;
+
+    }
+
+
+    async function handleRenameSubmit(oldPath: string, newName: string) {
+
+        renamingPath = null;
+
+        try {
+
+            /* Save if open and dirty before rename */
+
+            const openDoc = $openedFiles.find(f => pathsEqual(f.path, oldPath));
+
+            if (openDoc?.isDirty) {
+
+                await saveFile(oldPath);
+
+            }
+
+
+            const res = await window.craftale.filesystem.rename(oldPath, newName);
+
+            renameFileInStore(oldPath, res.newPath, res.newName);
+
+            if (selectedItem && pathsEqual(selectedItem.path, oldPath)) {
+
+                selectedItem = {
+                    ...selectedItem,
+                    name: res.newName,
+                    path: res.newPath
+                };
+
+            }
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Rename failed:", err);
+
+            alert(err?.message || "Rename failed.");
+
+        }
+
+    }
+
+
+    function handleRenameCancel() {
+
+        renamingPath = null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Delete Actions
+    |--------------------------------------------------------------------------
+    */
+
+    function startDelete(item?: FileItem) {
+
+        const target = item || selectedItem;
+
+        if (!target) return;
+
+        itemToDelete = target;
+
+        showDeleteModal = true;
+
+    }
+
+
+    async function confirmDelete() {
+
+        if (!itemToDelete) return;
+
+        const target = itemToDelete;
+
+        showDeleteModal = false;
+
+        itemToDelete = null;
+
+        try {
+
+            await window.craftale.filesystem.delete(
+                target.path,
+                target.type === "directory"
+            );
+
+            deleteFileInStore(target.path);
+
+            if (selectedItem && pathsEqual(selectedItem.path, target.path)) {
+
+                selectedItem = null;
+
+            }
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Delete failed:", err);
+
+            alert(err?.message || "Delete failed.");
+
+        }
+
+    }
+
+
+    function cancelDelete() {
+
+        showDeleteModal = false;
+
+        itemToDelete = null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Copy, Cut & Paste
+    |--------------------------------------------------------------------------
+    */
+
+    function handleCopy(item?: FileItem) {
+
+        const target = item || selectedItem;
+
+        if (!target) return;
+
+        copyToClipboard(target.path, target.name, target.type);
+
+    }
+
+
+    function handleCut(item?: FileItem) {
+
+        const target = item || selectedItem;
+
+        if (!target) return;
+
+        cutToClipboard(target.path, target.name, target.type);
+
+    }
+
+
+    function getTargetFolderForPaste(): string | null {
+
+        if (selectedItem) {
+
+            if (selectedItem.type === "directory") {
+
+                return selectedItem.path;
+
+            }
+
+            return getParentDir(selectedItem.path);
+
+        }
+
+        return rootPath;
+
+    }
+
+
+    async function handlePaste() {
+
+        const clip = $clipboard;
+
+        if (!clip) return;
+
+        const destDir = getTargetFolderForPaste();
+
+        if (!destDir) return;
+
+
+        /* Prevent pasting a directory inside itself or its descendants */
+
+        if (clip.type === "directory") {
+
+            const normSrc = clip.path.replace(/\\/g, "/").toLowerCase();
+
+            const normDest = destDir.replace(/\\/g, "/").toLowerCase();
+
+            if (normDest === normSrc || normDest.startsWith(normSrc + "/")) {
+
+                alert("Cannot move or copy a directory into itself or a subfolder.");
+
+                return;
+
+            }
+
+        }
+
+
+        try {
+
+            if (clip.operation === "copy") {
+
+                const res = await window.craftale.filesystem.copy(clip.path, destDir);
+
+                if (res.conflict) {
+
+                    conflictState = {
+                        srcPath: clip.path,
+                        destDir,
+                        name: res.existingName || clip.name,
+                        operation: "copy"
+                    };
+
+                    showConflictModal = true;
+
+                    return;
+
+                }
+
+            } else {
+
+                const res = await window.craftale.filesystem.move(clip.path, destDir);
+
+                if (res.conflict) {
+
+                    conflictState = {
+                        srcPath: clip.path,
+                        destDir,
+                        name: res.existingName || clip.name,
+                        operation: "move",
+                        isCut: true
+                    };
+
+                    showConflictModal = true;
+
+                    return;
+
+                }
+
+                if (res.targetPath && res.name) {
+
+                    renameFileInStore(clip.path, res.targetPath, res.name);
+
+                }
+
+                clearClipboard();
+
+            }
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Paste failed:", err);
+
+            alert(err?.message || "Paste operation failed.");
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Duplicate
+    |--------------------------------------------------------------------------
+    */
+
+    async function handleDuplicate(item?: FileItem) {
+
+        const target = item || selectedItem;
+
+        if (!target) return;
+
+        try {
+
+            await window.craftale.filesystem.duplicate(target.path);
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Duplicate failed:", err);
+
+            alert(err?.message || "Duplicate failed.");
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Conflict Modal Actions (Replace / Keep Both / Cancel)
+    |--------------------------------------------------------------------------
+    */
+
+    async function resolveConflict(keepBoth: boolean) {
+
+        if (!conflictState) return;
+
+        const { srcPath, destDir, operation, isCut } = conflictState;
+
+        showConflictModal = false;
+
+        conflictState = null;
+
+        try {
+
+            let res;
+
+            if (operation === "copy") {
+
+                res = await window.craftale.filesystem.copy(srcPath, destDir, {
+                    overwrite: !keepBoth,
+                    keepBoth
+                });
+
+            } else {
+
+                res = await window.craftale.filesystem.move(srcPath, destDir, {
+                    overwrite: !keepBoth,
+                    keepBoth
+                });
+
+                if (isCut && res.targetPath && res.name) {
+
+                    renameFileInStore(srcPath, res.targetPath, res.name);
+
+                    clearClipboard();
+
+                }
+
+            }
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Conflict resolution failed:", err);
+
+            alert(err?.message || "Operation failed.");
+
+        }
+
+    }
+
+
+    function cancelConflict() {
+
+        showConflictModal = false;
+
+        conflictState = null;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Drag and Drop on Folder or Root
+    |--------------------------------------------------------------------------
+    */
+
+    async function handleDropOnFolder(srcPath: string, targetDir: string) {
+
+        /* Prevent dropping into self */
+
+        const normSrc = srcPath.replace(/\\/g, "/").toLowerCase();
+
+        const normDest = targetDir.replace(/\\/g, "/").toLowerCase();
+
+        if (normDest === normSrc || normDest.startsWith(normSrc + "/")) {
+
+            return;
+
+        }
+
+        try {
+
+            const res = await window.craftale.filesystem.move(srcPath, targetDir);
+
+            if (res.conflict) {
+
+                conflictState = {
+                    srcPath,
+                    destDir: targetDir,
+                    name: res.existingName || srcPath.split(/[\\/]/).pop() || "",
+                    operation: "move"
+                };
+
+                showConflictModal = true;
+
+                return;
+
+            }
+
+            if (res.targetPath && res.name) {
+
+                renameFileInStore(srcPath, res.targetPath, res.name);
+
+            }
+
+            await refreshExplorer();
+
+        } catch (err: any) {
+
+            console.error("Drop move failed:", err);
+
+            alert(err?.message || "Move failed.");
+
+        }
+
+    }
+
+
+    function handleRootDragOver(event: DragEvent) {
+
+        if (!rootPath) return;
+
+        const srcPath = event.dataTransfer?.getData("application/craftale-path");
+
+        if (srcPath) {
+
+            const normSrc = srcPath.replace(/\\/g, "/").toLowerCase();
+
+            const normRoot = rootPath.replace(/\\/g, "/").toLowerCase();
+
+            if (normRoot === normSrc || normRoot.startsWith(normSrc + "/")) {
+
+                return;
+
+            }
+
+        }
+
+        event.preventDefault();
+
+        if (event.dataTransfer) {
+
+            event.dataTransfer.dropEffect = "move";
+
+        }
+
+        isRootDragOver = true;
+
+    }
+
+
+    function handleRootDragLeave(event: DragEvent) {
+
+        isRootDragOver = false;
+
+    }
+
+
+    function handleRootDrop(event: DragEvent) {
+
+        isRootDragOver = false;
+
+        if (!rootPath) return;
+
+        event.preventDefault();
+
+        const srcPath =
+            event.dataTransfer?.getData("application/craftale-path") ||
+            event.dataTransfer?.getData("text/plain");
+
+        if (srcPath && !pathsEqual(srcPath, rootPath)) {
+
+            handleDropOnFolder(srcPath, rootPath);
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Context Menu Handlers
+    |--------------------------------------------------------------------------
+    */
+
+    function handleTreeItemContextMenu(event: MouseEvent, item: FileItem) {
+
+        contextMenu = {
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            item
+        };
+
+    }
+
+
+    function handleRootContextMenu(event: MouseEvent) {
+
+        if (!rootPath) return;
+
+        event.preventDefault();
+
+        contextMenu = {
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            item: null
+        };
+
+    }
+
+
+    function closeContextMenu() {
+
+        contextMenu.visible = false;
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Keyboard Shortcuts in Explorer
+    |--------------------------------------------------------------------------
+    */
+
+    function handleKeydown(event: KeyboardEvent) {
+
+        /* Don't trigger shortcuts if user is typing in an input */
+
+        const targetTag = (event.target as HTMLElement)?.tagName?.toLowerCase();
+
+        if (targetTag === "input" || targetTag === "textarea") {
+
+            return;
+
+        }
+
+
+        if (event.key === "F2") {
+
+            if (selectedItem) {
+
+                event.preventDefault();
+
+                startRename(selectedItem);
+
+            }
+
+        } else if (event.key === "Delete") {
+
+            if (selectedItem) {
+
+                event.preventDefault();
+
+                startDelete(selectedItem);
+
+            }
+
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+
+            if (selectedItem) {
+
+                event.preventDefault();
+
+                handleCopy(selectedItem);
+
+            }
+
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
+
+            if (selectedItem) {
+
+                event.preventDefault();
+
+                handleCut(selectedItem);
+
+            }
+
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+
+            if ($clipboard) {
+
+                event.preventDefault();
+
+                handlePaste();
+
+            }
+
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
+
+            if (selectedItem) {
+
+                event.preventDefault();
+
+                handleDuplicate(selectedItem);
+
+            }
+
+        }
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lifecycle Subscriptions
+    |--------------------------------------------------------------------------
+    */
+
+    let refreshUnsub: () => void;
+
     onMount(() => {
 
-        /*
-         * We intentionally don't automatically
-         * select a folder here.
-         *
-         * The parent App can provide a folder
-         * later.
-         */
+        refreshUnsub = treeRefreshTrigger.subscribe((count) => {
+
+            if (count > 0 && rootPath) {
+
+                refreshExplorer();
+
+            }
+
+        });
+
+    });
+
+
+    onDestroy(() => {
+
+        refreshUnsub?.();
 
     });
 
 </script>
 
 
-<div class="explorer">
+<div
+    bind:this={explorerContainer}
+    class="explorer"
+    tabindex="0"
+    role="region"
+    aria-label="File Explorer"
+    onkeydown={handleKeydown}
+>
 
-
-    <!--
-    |--------------------------------------------------------------------------
-    | Header
-    |--------------------------------------------------------------------------
-    -->
+    <!-- Header -->
 
     <div class="explorer-header">
 
         <div class="title">
-
             EXPLORER
-
         </div>
 
+        {#if !rootPath}
 
-        <button
-            type="button"
-            class="open-button"
-            onclick={selectFolder}
-            title="Open Folder"
-        >
+            <button
+                type="button"
+                class="open-button"
+                onclick={selectFolder}
+                title="Open Folder"
+            >
+                Open Folder
+            </button>
 
-            Open Folder
-
-        </button>
+        {/if}
 
     </div>
 
 
-    <!--
-    |--------------------------------------------------------------------------
-    | Workspace
-    |--------------------------------------------------------------------------
-    -->
+    <!-- Workspace Header & Action Icons -->
 
     {#if rootPath}
 
-        <div class="workspace-name">
+        <div class="workspace-bar">
 
-            📁
-            {rootPath.split("\\").pop()}
+            <div class="workspace-name" title={rootPath}>
+                📁 {rootPath.split(/[\\/]/).pop()}
+            </div>
+
+
+            <!-- Header Action Buttons -->
+
+            <div class="actions">
+
+                <button
+                    type="button"
+                    class="action-btn"
+                    title="New File"
+                    onclick={() => startCreate("file")}
+                >
+                    +📄
+                </button>
+
+                <button
+                    type="button"
+                    class="action-btn"
+                    title="New Folder"
+                    onclick={() => startCreate("directory")}
+                >
+                    +📁
+                </button>
+
+                <button
+                    type="button"
+                    class="action-btn"
+                    title="Refresh Explorer"
+                    onclick={refreshExplorer}
+                >
+                    ↻
+                </button>
+
+            </div>
 
         </div>
 
 
-        <div class="tree">
+        <!-- Tree Container -->
+
+        <div
+            class="tree"
+            class:root-drag-over={isRootDragOver}
+            role="tree"
+            tabindex="0"
+            onclick={(e) => {
+                if (e.target === e.currentTarget) {
+                    selectedItem = null;
+                }
+            }}
+            onkeydown={(e) => {
+                if (e.key === "Escape") {
+                    selectedItem = null;
+                }
+            }}
+            oncontextmenu={handleRootContextMenu}
+            ondragover={handleRootDragOver}
+            ondragleave={handleRootDragLeave}
+            ondrop={handleRootDrop}
+        >
+
+            <!-- Inline Root Creation -->
+
+            {#if creatingUnderPath && pathsEqual(creatingUnderPath, rootPath)}
+
+                <div class="root-create-item">
+
+                    <span class="icon">
+                        {creatingType === "directory" ? "📁" : "📄"}
+                    </span>
+
+                    <input
+                        bind:this={createRootInputEl}
+                        type="text"
+                        class="inline-input"
+                        placeholder={creatingType === "directory" ? "Folder name" : "File name"}
+                        bind:value={createRootValue}
+                        onkeydown={handleRootCreateKeydown}
+                        onblur={() => {
+                            const trimmed = createRootValue.trim();
+                            if (trimmed && rootPath && creatingType) {
+                                handleCreateSubmit(rootPath, trimmed, creatingType);
+                            } else {
+                                handleCreateCancel();
+                            }
+                        }}
+                    />
+
+                </div>
+
+            {/if}
+
 
             {#if loading}
 
                 <div class="message">
-
                     Loading...
-
                 </div>
-
 
             {:else if error}
 
                 <div class="message error">
-
                     {error}
-
                 </div>
-
 
             {:else}
 
-                {#each rootItems as item (
-                    item.path
-                )}
+                {#each rootItems as item (item.path)}
 
                     <FileTreeItem
                         item={item}
+                        depth={0}
+                        selectedPath={selectedItem?.path ?? null}
+                        renamingPath={renamingPath}
+                        creatingUnderPath={creatingUnderPath}
+                        creatingType={creatingType}
+                        cutPath={$clipboard?.operation === "cut" ? $clipboard.path : null}
+                        refreshKey={refreshKey}
+                        onSelect={(clicked) => {
+                            selectedItem = clicked;
+                        }}
+                        onContextMenu={handleTreeItemContextMenu}
+                        onRenameSubmit={handleRenameSubmit}
+                        onRenameCancel={handleRenameCancel}
+                        onCreateSubmit={handleCreateSubmit}
+                        onCreateCancel={handleCreateCancel}
+                        onDropOnFolder={handleDropOnFolder}
                     />
 
                 {/each}
@@ -240,41 +1155,80 @@
 
         </div>
 
-
     {:else}
 
+        <!-- Empty State -->
 
         <div class="empty">
 
             <div class="empty-icon">
-
                 📁
-
             </div>
-
 
             <div class="empty-text">
-
                 No folder opened
-
             </div>
-
 
             <button
                 type="button"
                 onclick={selectFolder}
             >
-
                 Open Folder
-
             </button>
 
         </div>
 
-
     {/if}
 
 </div>
+
+
+<!-- Context Menu -->
+
+<ContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    visible={contextMenu.visible}
+    hasItem={contextMenu.item !== null}
+    canPaste={$clipboard !== null}
+    onNewFile={() => startCreate("file", contextMenu.item?.type === "directory" ? contextMenu.item.path : undefined)}
+    onNewFolder={() => startCreate("directory", contextMenu.item?.type === "directory" ? contextMenu.item.path : undefined)}
+    onCut={() => contextMenu.item && handleCut(contextMenu.item)}
+    onCopy={() => contextMenu.item && handleCopy(contextMenu.item)}
+    onPaste={handlePaste}
+    onDuplicate={() => contextMenu.item && handleDuplicate(contextMenu.item)}
+    onRename={() => contextMenu.item && startRename(contextMenu.item)}
+    onDelete={() => contextMenu.item && startDelete(contextMenu.item)}
+    onClose={closeContextMenu}
+/>
+
+
+<!-- Safe Deletion Confirmation Modal -->
+
+<ConfirmModal
+    visible={showDeleteModal}
+    title={itemToDelete?.type === "directory" ? "Delete Folder" : "Delete File"}
+    message={itemToDelete?.type === "directory"
+        ? `Are you sure you want to delete folder "${itemToDelete.name}" and all of its contents? This action cannot be undone.`
+        : `Are you sure you want to permanently delete "${itemToDelete?.name}"?`}
+    fileName={itemToDelete?.name ?? ""}
+    confirmText={itemToDelete?.type === "directory" ? "Delete Permanently" : "Delete"}
+    cancelText="Cancel"
+    danger={true}
+    onConfirm={confirmDelete}
+    onCancel={cancelDelete}
+/>
+
+
+<!-- Conflict Resolution Modal -->
+
+<ConflictModal
+    visible={showConflictModal}
+    fileName={conflictState?.name ?? ""}
+    onReplace={() => resolveConflict(false)}
+    onKeepBoth={() => resolveConflict(true)}
+    onCancel={cancelConflict}
+/>
 
 
 <style>
@@ -295,12 +1249,14 @@
 
         overflow: hidden;
 
+        outline: none;
+
     }
 
 
     .explorer-header {
 
-        min-height: 40px;
+        min-height: 36px;
 
         display: flex;
 
@@ -317,11 +1273,13 @@
 
     .title {
 
-        font-size: 12px;
+        font-size: 11px;
 
         font-weight: 600;
 
         letter-spacing: 0.5px;
+
+        color: #bbbbbb;
 
     }
 
@@ -350,7 +1308,7 @@
     }
 
 
-    .workspace-name {
+    .workspace-bar {
 
         min-height: 30px;
 
@@ -358,19 +1316,79 @@
 
         align-items: center;
 
+        justify-content: space-between;
+
         padding: 0 8px;
 
-        font-size: 12px;
-
-        font-weight: 600;
-
         border-bottom: 1px solid #333333;
+
+        background: #202021;
+
+    }
+
+
+    .workspace-name {
+
+        font-size: 11px;
+
+        font-weight: 700;
 
         overflow: hidden;
 
         white-space: nowrap;
 
         text-overflow: ellipsis;
+
+        color: #e0e0e0;
+
+        text-transform: uppercase;
+
+        letter-spacing: 0.5px;
+
+    }
+
+
+    .actions {
+
+        display: flex;
+
+        align-items: center;
+
+        gap: 2px;
+
+    }
+
+
+    .action-btn {
+
+        background: transparent;
+
+        border: none;
+
+        color: #aaaaaa;
+
+        cursor: pointer;
+
+        padding: 2px 4px;
+
+        font-size: 12px;
+
+        border-radius: 3px;
+
+        display: flex;
+
+        align-items: center;
+
+        justify-content: center;
+
+    }
+
+
+    .action-btn:hover {
+
+        background: #37373d;
+
+        color: #ffffff;
 
     }
 
@@ -379,9 +1397,71 @@
 
         flex: 1;
 
-        overflow: auto;
+        overflow-y: auto;
 
-        padding-top: 4px;
+        overflow-x: hidden;
+
+        padding-top: 2px;
+
+        outline: none;
+
+    }
+
+
+    .tree.root-drag-over {
+
+        background: rgba(9, 71, 113, 0.25);
+
+        outline: 1px dashed #007acc;
+
+    }
+
+
+    .root-create-item {
+
+        height: 24px;
+
+        display: flex;
+
+        align-items: center;
+
+        padding: 0 8px 0 22px;
+
+        background: rgba(0, 122, 204, 0.1);
+
+    }
+
+
+    .root-create-item .icon {
+
+        margin-right: 4px;
+
+        font-size: 13px;
+
+    }
+
+
+    .inline-input {
+
+        flex: 1;
+
+        height: 20px;
+
+        background: #3c3c3c;
+
+        color: #ffffff;
+
+        border: 1px solid #007acc;
+
+        outline: none;
+
+        font-size: 12px;
+
+        padding: 0 4px;
+
+        border-radius: 2px;
+
+        font-family: inherit;
 
     }
 
