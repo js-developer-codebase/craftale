@@ -918,6 +918,34 @@
 
                         }
 
+
+                        /*
+                        |--------------------------------------------------------------------------
+                        | Sync Model Content with External / Store Updates
+                        |--------------------------------------------------------------------------
+                        */
+
+                        for (const file of files) {
+
+                            const key = normalizePath(file.path);
+
+                            const existingModel = models.get(key);
+
+                            if (
+                                existingModel &&
+                                existingModel.getValue() !== file.content
+                            ) {
+
+                                switchingModel = true;
+
+                                existingModel.setValue(file.content);
+
+                                switchingModel = false;
+
+                            }
+
+                        }
+
                     }
                 );
 

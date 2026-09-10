@@ -2,6 +2,7 @@
 
     import { onMount } from "svelte";
     import { openFile, pathsEqual } from "../stores/workspace";
+    import { directoryInvalidation } from "../stores/watcher";
     import { notify } from "../stores/notifications";
     import { formatErrorMessage } from "../utils/errors";
     import FileTreeItem from "./FileTreeItem.svelte";
@@ -189,6 +190,38 @@
             }
 
         }
+
+    });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Watch Selective Directory Invalidation
+    |--------------------------------------------------------------------------
+    */
+
+    $effect(() => {
+
+        const unsub = directoryInvalidation.subscribe((inval) => {
+
+            if (
+                inval &&
+                expanded &&
+                item.type === "directory" &&
+                pathsEqual(item.path, inval.dirPath)
+            ) {
+
+                loadChildren();
+
+            }
+
+        });
+
+        return () => {
+
+            unsub();
+
+        };
 
     });
 

@@ -259,6 +259,33 @@ declare global {
 
             };
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | WATCHER
+            |--------------------------------------------------------------------------
+            */
+
+            watcher: {
+
+                start(
+                    workspacePath: string
+                ): Promise<boolean>;
+
+
+                stop(): Promise<boolean>;
+
+
+                onEvent(
+                    callback: (event: {
+                        type: "add" | "addDir" | "change" | "unlink" | "unlinkDir";
+                        path: string;
+                        parentDir: string;
+                    }) => void
+                ): () => void;
+
+            };
+
         };
 
     };

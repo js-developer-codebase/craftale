@@ -19,6 +19,9 @@
     import NotificationContainer
         from "./components/NotificationContainer.svelte";
 
+    import ExternalChangeModal
+        from "./components/ExternalChangeModal.svelte";
+
     import {
         notify
     } from "./stores/notifications";
@@ -207,6 +210,9 @@
 
     <!-- Global Toast Notifications -->
     <NotificationContainer />
+
+    <!-- External Change Conflict Modal -->
+    <ExternalChangeModal />
 
 </div>
 

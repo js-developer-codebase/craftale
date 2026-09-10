@@ -1,4 +1,5 @@
 import { writable, get } from "svelte/store";
+import { recordSelfTouch } from "./watcher";
 
 
 /*
@@ -386,6 +387,8 @@ export function markFileSaved(
 export async function saveFile(
     path: string
 ): Promise<boolean> {
+
+    recordSelfTouch(path);
 
     const files =
         get(openedFiles);

@@ -18,6 +18,9 @@ const fs = require("fs");
 const terminalManager =
     require("./ipc/terminal.cjs");
 
+const watcherManager =
+    require("./ipc/watcher.cjs");
+
 require("./ipc/fileSystem.cjs");
 
 
@@ -68,6 +71,10 @@ function createWindow() {
     */
 
     terminalManager.initialize(
+        window
+    );
+
+    watcherManager.initialize(
         window
     );
 
@@ -170,6 +177,8 @@ app.on(
         */
 
         terminalManager.killAll();
+
+        watcherManager.stopWatching();
 
 
         if (

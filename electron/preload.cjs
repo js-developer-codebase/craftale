@@ -449,6 +449,69 @@ contextBridge.exposeInMainWorld(
 
             }
 
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | WATCHER
+        |--------------------------------------------------------------------------
+        */
+
+        watcher: {
+
+            start: (
+                workspacePath
+            ) => {
+
+                return ipcRenderer.invoke(
+                    "watcher:start",
+                    workspacePath
+                );
+
+            },
+
+
+            stop: () => {
+
+                return ipcRenderer.invoke(
+                    "watcher:stop"
+                );
+
+            },
+
+
+            onEvent: (
+                callback
+            ) => {
+
+                const handler = (
+                    _event,
+                    data
+                ) => {
+
+                    callback(data);
+
+                };
+
+
+                ipcRenderer.on(
+                    "watcher:event",
+                    handler
+                );
+
+
+                return () => {
+
+                    ipcRenderer.removeListener(
+                        "watcher:event",
+                        handler
+                    );
+
+                };
+
+            }
+
         }
 
     }

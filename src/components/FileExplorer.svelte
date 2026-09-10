@@ -21,6 +21,12 @@
     } from "../stores/workspace";
 
     import {
+        recordSelfTouch,
+        handleWatcherEvent,
+        directoryInvalidation
+    } from "../stores/watcher";
+
+    import {
         notify
     } from "../stores/notifications";
 
@@ -138,6 +144,12 @@
             rootPath = folderPath;
 
             setWorkspace(folderPath);
+
+            if (window.craftale?.watcher?.start) {
+
+                await window.craftale.watcher.start(folderPath);
+
+            }
 
             refreshKey++;
 
@@ -290,6 +302,8 @@
 
                 const res = await window.craftale.filesystem.createFile(parentPath, name);
 
+                recordSelfTouch(res.path);
+
                 await refreshExplorer();
 
                 /* Automatically open created file */
@@ -311,6 +325,8 @@
             } else {
 
                 const res = await window.craftale.filesystem.createFolder(parentPath, name);
+
+                recordSelfTouch(res.path);
 
                 await refreshExplorer();
 
@@ -431,6 +447,10 @@
 
             const res = await window.craftale.filesystem.rename(oldPath, newName);
 
+            recordSelfTouch(oldPath);
+
+            recordSelfTouch(res.newPath);
+
             renameFileInStore(oldPath, res.newPath, res.newName);
 
             if (selectedItem && pathsEqual(selectedItem.path, oldPath)) {
@@ -499,6 +519,8 @@
         itemToDelete = null;
 
         try {
+
+            recordSelfTouch(target.path);
 
             await window.craftale.filesystem.delete(
                 target.path,
@@ -639,6 +661,12 @@
 
                 }
 
+                if (res.targetPath) {
+
+                    recordSelfTouch(res.targetPath);
+
+                }
+
                 notify.success(`Pasted "${clip.name}"`);
 
             } else {
@@ -661,7 +689,11 @@
 
                 }
 
+                recordSelfTouch(clip.path);
+
                 if (res.targetPath && res.name) {
+
+                    recordSelfTouch(res.targetPath);
 
                     renameFileInStore(clip.path, res.targetPath, res.name);
 
@@ -705,6 +737,12 @@
         try {
 
             const res = await window.craftale.filesystem.duplicate(target.path);
+
+            if (res.targetPath) {
+
+                recordSelfTouch(res.targetPath);
+
+            }
 
             await refreshExplorer();
 
@@ -752,6 +790,12 @@
                     keepBoth
                 });
 
+                if (res.targetPath) {
+
+                    recordSelfTouch(res.targetPath);
+
+                }
+
                 notify.success(`Copied "${res.name}"`);
 
             } else {
@@ -760,6 +804,14 @@
                     overwrite: !keepBoth,
                     keepBoth
                 });
+
+                recordSelfTouch(srcPath);
+
+                if (res.targetPath) {
+
+                    recordSelfTouch(res.targetPath);
+
+                }
 
                 if (isCut && res.targetPath && res.name) {
 
@@ -840,7 +892,11 @@
 
             }
 
+            recordSelfTouch(srcPath);
+
             if (res.targetPath && res.name) {
+
+                recordSelfTouch(res.targetPath);
 
                 renameFileInStore(srcPath, res.targetPath, res.name);
 
@@ -1059,6 +1115,10 @@
 
     let refreshUnsub: () => void;
 
+    let invalidationUnsub: () => void;
+
+    let watcherEventRemover: (() => void) | null = null;
+
     onMount(() => {
 
         refreshUnsub = treeRefreshTrigger.subscribe((count) => {
@@ -1071,12 +1131,38 @@
 
         });
 
+        invalidationUnsub = directoryInvalidation.subscribe((inval) => {
+
+            if (inval && rootPath && pathsEqual(inval.dirPath, rootPath)) {
+
+                refreshExplorer();
+
+            }
+
+        });
+
+        if (window.craftale?.watcher?.onEvent) {
+
+            watcherEventRemover = window.craftale.watcher.onEvent(handleWatcherEvent);
+
+        }
+
     });
 
 
     onDestroy(() => {
 
         refreshUnsub?.();
+
+        invalidationUnsub?.();
+
+        watcherEventRemover?.();
+
+        if (window.craftale?.watcher?.stop) {
+
+            void window.craftale.watcher.stop();
+
+        }
 
     });
 
