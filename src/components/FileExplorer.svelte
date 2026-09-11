@@ -1600,6 +1600,47 @@
 
         outline: none;
 
+        scrollbar-width: thin;
+
+        scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+
+    }
+
+
+    .tree::-webkit-scrollbar {
+
+        width: 6px;
+
+    }
+
+
+    .tree::-webkit-scrollbar-track {
+
+        background: transparent;
+
+    }
+
+
+    .tree::-webkit-scrollbar-thumb {
+
+        background: rgba(255, 255, 255, 0.16);
+
+        border-radius: 3px;
+
+    }
+
+
+    .tree::-webkit-scrollbar-thumb:hover {
+
+        background: rgba(255, 255, 255, 0.32);
+
+    }
+
+
+    .tree::-webkit-scrollbar-corner {
+
+        background: transparent;
+
     }
 
 

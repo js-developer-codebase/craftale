@@ -40,7 +40,7 @@
         dismissMatch,
         dismissFile
     } from "../stores/search";
-    import { workspacePath, openedFiles } from "../stores/workspace";
+    import { workspacePath, openedFiles, activeFile } from "../stores/workspace";
 
     let searchInputEl = $state<HTMLInputElement | null>(null);
     let replaceInputEl = $state<HTMLInputElement | null>(null);
@@ -50,21 +50,58 @@
     }
 
     function handleSearchKeyDown(e: KeyboardEvent) {
+        if (e.altKey && !e.ctrlKey && !e.metaKey) {
+            if (e.key.toLowerCase() === "c") {
+                e.preventDefault();
+                toggleOption("case");
+                return;
+            }
+            if (e.key.toLowerCase() === "w") {
+                e.preventDefault();
+                toggleOption("word");
+                return;
+            }
+            if (e.key.toLowerCase() === "r") {
+                e.preventDefault();
+                toggleOption("regex");
+                return;
+            }
+        }
+
         if (e.key === "Enter") {
             e.preventDefault();
             void runWorkspaceSearch();
         } else if (e.key === "ArrowDown") {
             e.preventDefault();
             navigateNextMatch();
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            navigatePrevMatch();
+        } else if (e.key === "F4") {
+            e.preventDefault();
+            if (e.shiftKey) {
+                navigatePrevMatch();
+            } else {
+                navigateNextMatch();
+            }
         } else if (e.key === "Escape") {
             clearSearch();
         }
     }
 
     function handleReplaceKeyDown(e: KeyboardEvent) {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey || e.altKey)) {
+        if (e.key === "Enter") {
             e.preventDefault();
-            promptReplaceWorkspace();
+            if (e.ctrlKey || e.metaKey || e.altKey) {
+                promptReplaceWorkspace();
+            } else {
+                const sel = $activeMatchSelection;
+                if (sel) {
+                    void replaceOneMatch(sel.fileIndex, sel.matchIndex);
+                } else {
+                    promptReplaceWorkspace();
+                }
+            }
         }
     }
 
@@ -372,6 +409,27 @@
                     >
                         { $onlyOpenEditors ? "✓ Open Editors Only" : "○ Open Editors Only" }
                     </button>
+
+                    {#if $activeFile}
+                        {@const currentFileName = $activeFile.name}
+                        {@const isCurrentFiltered = $includePattern.trim() === currentFileName}
+                        <button
+                            type="button"
+                            class="quick-filter-btn"
+                            class:active={isCurrentFiltered}
+                            onclick={() => {
+                                if (isCurrentFiltered) {
+                                    includePattern.set("");
+                                } else {
+                                    includePattern.set(currentFileName);
+                                }
+                                void runWorkspaceSearch();
+                            }}
+                            title={`Filter search to ${currentFileName}`}
+                        >
+                            { isCurrentFiltered ? `✓ Only ${currentFileName}` : `Filter to ${currentFileName}` }
+                        </button>
+                    {/if}
                 </div>
             </div>
         {/if}
