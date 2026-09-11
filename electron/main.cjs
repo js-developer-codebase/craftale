@@ -21,6 +21,9 @@ const terminalManager =
 const watcherManager =
     require("./ipc/watcher.cjs");
 
+const lspManager =
+    require("./ipc/lsp.cjs");
+
 require("./ipc/fileSystem.cjs");
 require("./ipc/search.cjs");
 require("./ipc/git.cjs");
@@ -77,6 +80,10 @@ function createWindow() {
     );
 
     watcherManager.initialize(
+        window
+    );
+
+    lspManager.initialize(
         window
     );
 
@@ -196,6 +203,8 @@ app.on(
         terminalManager.killAll();
 
         watcherManager.stopWatching();
+
+        lspManager.stopAllServers();
 
 
         if (

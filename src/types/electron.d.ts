@@ -533,6 +533,67 @@ declare global {
 
             };
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | LSP (Language Server Protocol)
+            |--------------------------------------------------------------------------
+            */
+
+            lsp: {
+
+                startServer(
+                    languageId: string,
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    serverId?: string;
+                    alreadyRunning?: boolean;
+                    error?: string;
+                }>;
+
+                stopServer(
+                    serverId: string
+                ): Promise<{
+                    success: boolean;
+                    error?: string;
+                }>;
+
+                stopAll(): Promise<{
+                    success: boolean;
+                }>;
+
+                sendMessage(
+                    serverId: string,
+                    message: any
+                ): Promise<{
+                    success: boolean;
+                    error?: string;
+                }>;
+
+                getServersStatus(): Promise<Record<string, {
+                    name: string;
+                    status: "starting" | "running" | "stopped" | "error";
+                    workspacePath?: string;
+                    pid?: number;
+                }>>;
+
+                onMessage(
+                    callback: (data: { serverId: string; message: any }) => void
+                ): () => void;
+
+                onStatusChange(
+                    callback: (data: {
+                        serverId: string;
+                        status: "starting" | "running" | "stopped" | "error";
+                        code?: number;
+                        signal?: string;
+                        error?: string;
+                    }) => void
+                ): () => void;
+
+            };
+
         };
 
     };

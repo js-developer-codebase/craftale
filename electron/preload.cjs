@@ -666,6 +666,49 @@ contextBridge.exposeInMainWorld(
                 return ipcRenderer.invoke("git:checkout", workspacePath, branchName, createNew);
             }
 
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LSP (Language Server Protocol)
+        |--------------------------------------------------------------------------
+        */
+
+        lsp: {
+
+            startServer: (languageId, workspacePath) => {
+                return ipcRenderer.invoke("lsp:start-server", { languageId, workspacePath });
+            },
+
+            stopServer: (serverId) => {
+                return ipcRenderer.invoke("lsp:stop-server", { serverId });
+            },
+
+            stopAll: () => {
+                return ipcRenderer.invoke("lsp:stop-all");
+            },
+
+            sendMessage: (serverId, message) => {
+                return ipcRenderer.invoke("lsp:send-message", { serverId, message });
+            },
+
+            getServersStatus: () => {
+                return ipcRenderer.invoke("lsp:get-servers-status");
+            },
+
+            onMessage: (callback) => {
+                const handler = (_event, data) => callback(data);
+                ipcRenderer.on("lsp:message", handler);
+                return () => ipcRenderer.removeListener("lsp:message", handler);
+            },
+
+            onStatusChange: (callback) => {
+                const handler = (_event, data) => callback(data);
+                ipcRenderer.on("lsp:status", handler);
+                return () => ipcRenderer.removeListener("lsp:status", handler);
+            }
+
         }
 
     }

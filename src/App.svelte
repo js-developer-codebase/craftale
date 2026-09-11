@@ -39,6 +39,13 @@
     import FileHistorySwitcher
         from "./components/FileHistorySwitcher.svelte";
 
+    import LspStatusBar
+        from "./components/LspStatusBar.svelte";
+
+    import {
+        lspManager
+    } from "./services/lsp/LspClientManager";
+
     import {
         notify
     } from "./stores/notifications";
@@ -352,10 +359,13 @@
             triggerGitRefreshDebounced();
         });
 
+        lspManager.init(get(workspacePath));
+
         unregisterWorkspace = workspacePath.subscribe((path) => {
             if (path) {
                 triggerGitRefreshDebounced(200);
             }
+            void lspManager.setWorkspace(path);
         });
 
     });
@@ -388,6 +398,8 @@
             unregisterWorkspace();
             unregisterWorkspace = null;
         }
+
+        void lspManager.shutdownAll();
 
     });
 
@@ -468,6 +480,20 @@
             <Terminal cwd={$workspacePath ?? ""} />
 
         </section>
+
+        <!-- Status Bar -->
+        <footer class="app-status-bar">
+            <div class="status-bar-left">
+                {#if $workspacePath}
+                    <span class="status-workspace-name">
+                        {$workspacePath.split(/[\\/]/).pop()}
+                    </span>
+                {/if}
+            </div>
+            <div class="status-bar-right">
+                <LspStatusBar />
+            </div>
+        </footer>
 
     </main>
 
@@ -705,6 +731,44 @@
         display:
             none !important;
 
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Status Bar
+    |--------------------------------------------------------------------------
+    */
+
+    .app-status-bar {
+        height: 22px;
+        min-height: 22px;
+        background: #181818;
+        color: #cccccc;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 10px;
+        font-size: 11px;
+        z-index: 10;
+        border-top: 1px solid #2d2d2d;
+    }
+
+    .status-bar-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .status-workspace-name {
+        font-weight: 500;
+        color: #999999;
+    }
+
+    .status-bar-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
 </style>

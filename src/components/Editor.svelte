@@ -74,6 +74,11 @@
         notify
     } from "../stores/notifications";
 
+    import { lspManager } from "../services/lsp/LspClientManager";
+    import { registerMonacoLspAdapters } from "../services/lsp/monacoAdapters";
+    import { pathToUri } from "../services/lsp/protocol";
+    import { clearFileDiagnostics } from "../stores/lsp";
+
 
     /*
     |--------------------------------------------------------------------------
@@ -260,7 +265,7 @@
 
             case "svelte":
 
-                return "html";
+                return "svelte";
 
 
             case "md":
@@ -402,6 +407,9 @@
         switchingModel =
             false;
 
+        const lang = getLanguage(file.name);
+        void lspManager.notifyDocumentOpen(file.path, lang, file.content);
+
         recordFileAccess(file.path);
 
         const syms = parseDocumentSymbols(file.content, file.name);
@@ -498,6 +506,8 @@
                 "[EDITOR] Saved successfully:",
                 path
             );
+
+            lspManager.notifyDocumentSave(path, content);
 
             notify.success(`Saved "${fileName}"`);
 
@@ -1331,6 +1341,9 @@
 
         }
 
+        lspManager.notifyDocumentClose(filePath);
+        clearFileDiagnostics(pathToUri(filePath));
+
     }
 
 
@@ -1724,6 +1737,39 @@
 
             /*
             |--------------------------------------------------------------------------
+            | Initialize LSP Monaco Adapters & Shortcuts
+            |--------------------------------------------------------------------------
+            */
+
+            registerMonacoLspAdapters();
+
+            /* Format Document: Shift + Alt + F */
+            editor.addCommand(
+                monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+                () => {
+                    void editor.getAction("editor.action.formatDocument")?.run();
+                }
+            );
+
+            /* Rename Symbol: F2 */
+            editor.addCommand(
+                monaco.KeyCode.F2,
+                () => {
+                    void editor.getAction("editor.action.rename")?.run();
+                }
+            );
+
+            /* Quick Fix / Code Actions: Ctrl + . */
+            editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.Period,
+                () => {
+                    void editor.getAction("editor.action.quickFix")?.run();
+                }
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Ctrl + ` Toggle Terminal Command
             |--------------------------------------------------------------------------
             */
@@ -1995,6 +2041,8 @@
                             path,
                             content
                         );
+
+                        lspManager.notifyDocumentChange(path, content);
 
                         const syms = parseDocumentSymbols(content, $activeFile?.name || path);
                         activeDocumentSymbols.set(syms);
