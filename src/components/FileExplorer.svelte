@@ -1,6 +1,7 @@
 <script lang="ts">
 
     import { onMount, onDestroy } from "svelte";
+    import { get } from "svelte/store";
     import FileTreeItem, { type FileItem } from "./FileTreeItem.svelte";
     import ContextMenu from "./ContextMenu.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
@@ -8,6 +9,7 @@
     import SymbolOutline from "./SymbolOutline.svelte";
     import {
         setWorkspace,
+        workspacePath,
         openedFiles,
         saveFile,
         openFile,
@@ -1114,13 +1116,31 @@
     |--------------------------------------------------------------------------
     */
 
-    let refreshUnsub: () => void;
+    let refreshUnsub: (() => void) | undefined;
 
-    let invalidationUnsub: () => void;
+    let invalidationUnsub: (() => void) | undefined;
+
+    let workspaceUnsub: (() => void) | undefined;
 
     let watcherEventRemover: (() => void) | null = null;
 
     onMount(() => {
+
+        /* 1. Restore opened folder from workspace store if set */
+        const currentPath = get(workspacePath);
+        if (currentPath && (!rootPath || rootItems.length === 0)) {
+            void loadFolder(currentPath);
+        }
+
+        /* 2. React to external workspace folder changes */
+        workspaceUnsub = workspacePath.subscribe((path) => {
+            if (path && path !== rootPath) {
+                void loadFolder(path);
+            } else if (!path && rootPath) {
+                rootPath = null;
+                rootItems = [];
+            }
+        });
 
         refreshUnsub = treeRefreshTrigger.subscribe((count) => {
 
@@ -1153,17 +1173,13 @@
 
     onDestroy(() => {
 
+        workspaceUnsub?.();
+
         refreshUnsub?.();
 
         invalidationUnsub?.();
 
         watcherEventRemover?.();
-
-        if (window.craftale?.watcher?.stop) {
-
-            void window.craftale.watcher.stop();
-
-        }
 
     });
 

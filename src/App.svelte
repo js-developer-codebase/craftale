@@ -415,13 +415,17 @@
     {#if $isSidebarVisible}
         <aside class="sidebar">
 
-            {#if $activeSidebarView === "explorer"}
+            <div class="sidebar-view" class:hidden={$activeSidebarView !== "explorer"}>
                 <FileExplorer />
-            {:else if $activeSidebarView === "search"}
+            </div>
+
+            <div class="sidebar-view" class:hidden={$activeSidebarView !== "search"}>
                 <WorkspaceSearch />
-            {:else if $activeSidebarView === "sourceControl"}
+            </div>
+
+            <div class="sidebar-view" class:hidden={$activeSidebarView !== "sourceControl"}>
                 <SourceControl />
-            {/if}
+            </div>
 
         </aside>
     {/if}
@@ -589,6 +593,28 @@
 
         border-right:
             1px solid #333333;
+
+    }
+
+
+    .sidebar-view {
+
+        width: 100%;
+
+        height: 100%;
+
+        display: flex;
+
+        flex-direction: column;
+
+        overflow: hidden;
+
+    }
+
+
+    .sidebar-view.hidden {
+
+        display: none !important;
 
     }
 
