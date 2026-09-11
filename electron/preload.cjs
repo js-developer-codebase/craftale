@@ -664,6 +664,22 @@ contextBridge.exposeInMainWorld(
 
             checkout: (workspacePath, branchName, createNew = false) => {
                 return ipcRenderer.invoke("git:checkout", workspacePath, branchName, createNew);
+            },
+
+            getFileContent: (workspacePath, ref, relativePath) => {
+                return ipcRenderer.invoke("git:get-file-content", workspacePath, ref, relativePath);
+            },
+
+            compareBranches: (workspacePath, baseBranch, compareBranch) => {
+                return ipcRenderer.invoke("git:compare-branches", workspacePath, baseBranch, compareBranch);
+            },
+
+            applyPatch: (workspacePath, patchString, cached = true) => {
+                return ipcRenderer.invoke("git:apply-patch", workspacePath, patchString, cached);
+            },
+
+            getRawDiff: (workspacePath, relativePath, staged = false) => {
+                return ipcRenderer.invoke("git:get-raw-diff", workspacePath, relativePath, staged);
             }
 
         },
@@ -683,6 +699,10 @@ contextBridge.exposeInMainWorld(
 
             stopServer: (serverId) => {
                 return ipcRenderer.invoke("lsp:stop-server", { serverId });
+            },
+
+            restartServer: (serverId, workspacePath) => {
+                return ipcRenderer.invoke("lsp:restart-server", { serverId, workspacePath });
             },
 
             stopAll: () => {
@@ -707,6 +727,21 @@ contextBridge.exposeInMainWorld(
                 const handler = (_event, data) => callback(data);
                 ipcRenderer.on("lsp:status", handler);
                 return () => ipcRenderer.removeListener("lsp:status", handler);
+            }
+
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMPILER / TYPE CHECKER
+        |--------------------------------------------------------------------------
+        */
+
+        compiler: {
+
+            runCheck: (workspacePath) => {
+                return ipcRenderer.invoke("compiler:run-check", { workspacePath });
             }
 
         }

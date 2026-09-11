@@ -15,6 +15,7 @@ import {
     updateServerStatus,
     type DiagnosticItem
 } from "../../stores/lsp";
+import { setLspFileProblems } from "../../stores/problems";
 
 /*
 |--------------------------------------------------------------------------
@@ -142,6 +143,7 @@ function setupDiagnosticsListener() {
             }));
 
             setFileDiagnostics(uri, storeItems);
+            setLspFileProblems(uri, storeItems);
         });
     }
 }

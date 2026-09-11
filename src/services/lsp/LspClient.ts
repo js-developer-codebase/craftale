@@ -190,9 +190,15 @@ export class LspClient {
         }
     }
 
+    public notifyStatusChange(status: ClientStatus, error?: string) {
+        if (this.status !== status) {
+            this.setStatus(status, error);
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
-    | Server Lifecycle: Start & Initialize
+    | Server Lifecycle: Start, Restart & Initialize
     |--------------------------------------------------------------------------
     */
     public async startAndInitialize(workspacePath: string): Promise<boolean> {
@@ -215,142 +221,187 @@ export class LspClient {
                 return false;
             }
 
-            const rootUri = pathToUri(workspacePath);
-            const folderName = workspacePath.split(/[\\/]/).pop() || "workspace";
-
-            const initParams = {
-                processId: null,
-                rootPath: workspacePath,
-                rootUri,
-                workspaceFolders: [
-                    {
-                        uri: rootUri,
-                        name: folderName
-                    }
-                ],
-                capabilities: {
-                    workspace: {
-                        applyEdit: true,
-                        workspaceEdit: {
-                            documentChanges: true,
-                            resourceOperations: ["create", "rename", "delete"]
-                        },
-                        didChangeConfiguration: { dynamicRegistration: false },
-                        didChangeWatchedFiles: { dynamicRegistration: false },
-                        symbol: {
-                            dynamicRegistration: false,
-                            symbolKind: {
-                                valueSet: [
-                                    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
-                                ]
-                            }
-                        },
-                        workspaceFolders: true,
-                        configuration: true
-                    },
-                    textDocument: {
-                        synchronization: {
-                            dynamicRegistration: false,
-                            willSave: false,
-                            willSaveWaitUntil: false,
-                            didSave: true
-                        },
-                        completion: {
-                            dynamicRegistration: false,
-                            completionItem: {
-                                snippetSupport: true,
-                                commitCharactersSupport: true,
-                                documentationFormat: ["markdown", "plaintext"],
-                                deprecatedSupport: true,
-                                preselectSupport: true,
-                                tagSupport: { valueSet: [1] }
-                            },
-                            completionItemKind: {
-                                valueSet: [
-                                    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                    16, 17, 18, 19, 20, 21, 22, 23, 24, 25
-                                ]
-                            },
-                            contextSupport: true
-                        },
-                        hover: {
-                            dynamicRegistration: false,
-                            contentFormat: ["markdown", "plaintext"]
-                        },
-                        signatureHelp: {
-                            dynamicRegistration: false,
-                            signatureInformation: {
-                                documentationFormat: ["markdown", "plaintext"],
-                                parameterInformation: { labelOffsetSupport: true }
-                            }
-                        },
-                        definition: {
-                            dynamicRegistration: false,
-                            linkSupport: true
-                        },
-                        implementation: {
-                            dynamicRegistration: false,
-                            linkSupport: true
-                        },
-                        references: {
-                            dynamicRegistration: false
-                        },
-                        documentSymbol: {
-                            dynamicRegistration: false,
-                            hierarchicalDocumentSymbolSupport: true,
-                            symbolKind: {
-                                valueSet: [
-                                    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
-                                ]
-                            }
-                        },
-                        codeAction: {
-                            dynamicRegistration: false,
-                            codeActionLiteralSupport: {
-                                codeActionKind: {
-                                    valueSet: [
-                                        "",
-                                        "quickfix",
-                                        "refactor",
-                                        "refactor.extract",
-                                        "refactor.inline",
-                                        "refactor.rewrite",
-                                        "source",
-                                        "source.organizeImports"
-                                    ]
-                                }
-                            }
-                        },
-                        formatting: { dynamicRegistration: false },
-                        rangeFormatting: { dynamicRegistration: false },
-                        rename: {
-                            dynamicRegistration: false,
-                            prepareSupport: true
-                        },
-                        publishDiagnostics: {
-                            relatedInformation: true,
-                            tagSupport: { valueSet: [1, 2] },
-                            versionSupport: true
-                        }
-                    }
-                },
-                initializationOptions: {}
-            };
-
-            const result = await this.sendRequest("initialize", initParams, 20000);
-            this.serverCapabilities = result?.capabilities || {};
-            await this.sendNotification("initialized", {});
-
-            this.setStatus("ready");
-            console.log(`[LSP ${this.serverId}] Initialized with capabilities:`, this.serverCapabilities);
-            return true;
+            return await this.initializeProtocol(workspacePath);
         } catch (err: any) {
             console.error(`[LSP ${this.serverId}] Initialization failed:`, err);
             this.setStatus("error", err.message);
             return false;
         }
+    }
+
+    public async restart(workspacePath?: string): Promise<boolean> {
+        const targetWorkspace = workspacePath !== undefined ? workspacePath : (this.workspacePath || "");
+        this.workspacePath = targetWorkspace;
+
+        // Cancel and reject any pending requests from the old session
+        this.pendingRequests.forEach((req) => {
+            clearTimeout(req.timer);
+            req.reject(new Error(`LSP server '${this.serverId}' was restarted`));
+        });
+        this.pendingRequests.clear();
+
+        this.setStatus("starting");
+
+        if (!window.craftale?.lsp) {
+            this.setStatus("error", "craftale.lsp not found in window");
+            return false;
+        }
+
+        try {
+            let res;
+            if (typeof window.craftale.lsp.restartServer === "function") {
+                res = await window.craftale.lsp.restartServer(this.serverId, targetWorkspace);
+            } else {
+                await window.craftale.lsp.stopServer(this.serverId);
+                res = await window.craftale.lsp.startServer(this.serverId, targetWorkspace);
+            }
+
+            if (!res.success) {
+                this.setStatus("error", res.error);
+                return false;
+            }
+
+            return await this.initializeProtocol(targetWorkspace);
+        } catch (err: any) {
+            console.error(`[LSP ${this.serverId}] Restart failed:`, err);
+            this.setStatus("error", err.message);
+            return false;
+        }
+    }
+
+    private async initializeProtocol(workspacePath: string): Promise<boolean> {
+        const hasWorkspace = Boolean(workspacePath && workspacePath.trim());
+        const rootUri = hasWorkspace ? pathToUri(workspacePath) : null;
+        const folderName = hasWorkspace ? (workspacePath.split(/[\\/]/).pop() || "workspace") : "workspace";
+
+        const initParams = {
+            processId: null,
+            rootPath: hasWorkspace ? workspacePath : null,
+            rootUri,
+            workspaceFolders: hasWorkspace && rootUri ? [
+                {
+                    uri: rootUri,
+                    name: folderName
+                }
+            ] : null,
+            capabilities: {
+                workspace: {
+                    applyEdit: true,
+                    workspaceEdit: {
+                        documentChanges: true,
+                        resourceOperations: ["create", "rename", "delete"]
+                    },
+                    didChangeConfiguration: { dynamicRegistration: false },
+                    didChangeWatchedFiles: { dynamicRegistration: false },
+                    symbol: {
+                        dynamicRegistration: false,
+                        symbolKind: {
+                            valueSet: [
+                                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                                16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+                            ]
+                        }
+                    },
+                    workspaceFolders: true,
+                    configuration: true
+                },
+                textDocument: {
+                    synchronization: {
+                        dynamicRegistration: false,
+                        willSave: false,
+                        willSaveWaitUntil: false,
+                        didSave: true
+                    },
+                    completion: {
+                        dynamicRegistration: false,
+                        completionItem: {
+                            snippetSupport: true,
+                            commitCharactersSupport: true,
+                            documentationFormat: ["markdown", "plaintext"],
+                            deprecatedSupport: true,
+                            preselectSupport: true,
+                            tagSupport: { valueSet: [1] }
+                        },
+                        completionItemKind: {
+                            valueSet: [
+                                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                                16, 17, 18, 19, 20, 21, 22, 23, 24, 25
+                            ]
+                        },
+                        contextSupport: true
+                    },
+                    hover: {
+                        dynamicRegistration: false,
+                        contentFormat: ["markdown", "plaintext"]
+                    },
+                    signatureHelp: {
+                        dynamicRegistration: false,
+                        signatureInformation: {
+                            documentationFormat: ["markdown", "plaintext"],
+                            parameterInformation: { labelOffsetSupport: true }
+                        }
+                    },
+                    definition: {
+                        dynamicRegistration: false,
+                        linkSupport: true
+                    },
+                    implementation: {
+                        dynamicRegistration: false,
+                        linkSupport: true
+                    },
+                    references: {
+                        dynamicRegistration: false
+                    },
+                    documentSymbol: {
+                        dynamicRegistration: false,
+                        hierarchicalDocumentSymbolSupport: true,
+                        symbolKind: {
+                            valueSet: [
+                                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                                16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+                            ]
+                        }
+                    },
+                    codeAction: {
+                        dynamicRegistration: false,
+                        codeActionLiteralSupport: {
+                            codeActionKind: {
+                                valueSet: [
+                                    "",
+                                    "quickfix",
+                                    "refactor",
+                                    "refactor.extract",
+                                    "refactor.inline",
+                                    "refactor.rewrite",
+                                    "source",
+                                    "source.organizeImports"
+                                ]
+                            }
+                        }
+                    },
+                    formatting: { dynamicRegistration: false },
+                    rangeFormatting: { dynamicRegistration: false },
+                    rename: {
+                        dynamicRegistration: false,
+                        prepareSupport: true
+                    },
+                    publishDiagnostics: {
+                        relatedInformation: true,
+                        tagSupport: { valueSet: [1, 2] },
+                        versionSupport: true
+                    }
+                }
+            },
+            initializationOptions: {}
+        };
+
+        const result = await this.sendRequest("initialize", initParams, 20000);
+        this.serverCapabilities = result?.capabilities || {};
+        await this.sendNotification("initialized", {});
+
+        this.setStatus("ready");
+        console.log(`[LSP ${this.serverId}] Initialized with capabilities:`, this.serverCapabilities);
+        return true;
     }
 
     /*

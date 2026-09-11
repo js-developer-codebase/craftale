@@ -531,6 +531,53 @@ declare global {
                     error?: string;
                 }>;
 
+                getFileContent(
+                    workspacePath: string,
+                    ref: string,
+                    relativePath: string
+                ): Promise<{
+                    success: boolean;
+                    exists: boolean;
+                    content: string;
+                    error?: string;
+                }>;
+
+                compareBranches(
+                    workspacePath: string,
+                    baseBranch: string,
+                    compareBranch: string
+                ): Promise<{
+                    success: boolean;
+                    files: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        status: string;
+                    }>;
+                    error?: string;
+                }>;
+
+                applyPatch(
+                    workspacePath: string,
+                    patchString: string,
+                    cached?: boolean
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    error?: string;
+                    code?: number;
+                }>;
+
+                getRawDiff(
+                    workspacePath: string,
+                    relativePath: string,
+                    staged?: boolean
+                ): Promise<{
+                    success: boolean;
+                    diff: string;
+                    error?: string;
+                }>;
+
             };
 
 
@@ -556,6 +603,15 @@ declare global {
                     serverId: string
                 ): Promise<{
                     success: boolean;
+                    error?: string;
+                }>;
+
+                restartServer(
+                    serverId: string,
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    serverId?: string;
                     error?: string;
                 }>;
 
@@ -591,6 +647,34 @@ declare global {
                         error?: string;
                     }) => void
                 ): () => void;
+
+            };
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | COMPILER / TYPE CHECKER
+            |--------------------------------------------------------------------------
+            */
+
+            compiler: {
+
+                runCheck(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    error?: string;
+                    problems: Array<{
+                        filePath: string;
+                        line: number;
+                        column: number;
+                        severity: "error" | "warning" | "info" | "hint";
+                        message: string;
+                        source?: string;
+                        code?: string | number;
+                    }>;
+                    rawOutput?: string;
+                }>;
 
             };
 

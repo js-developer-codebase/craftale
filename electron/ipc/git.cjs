@@ -39,13 +39,19 @@ async function runGit(args, cwd) {
     }
 }
 
+function handleIpc(channel, handler) {
+    if (ipcMain) {
+        ipcMain.handle(channel, handler);
+    }
+}
+
 /*
 |--------------------------------------------------------------------------
 | IPC: Check if Directory is Git Repository
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:is-repo", async (event, workspacePath) => {
+handleIpc("git:is-repo", async (event, workspacePath) => {
     if (!workspacePath) return false;
     const res = await runGit(["rev-parse", "--is-inside-work-tree"], workspacePath);
     return res.success && res.stdout.trim() === "true";
@@ -57,7 +63,7 @@ ipcMain.handle("git:is-repo", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:init", async (event, workspacePath) => {
+handleIpc("git:init", async (event, workspacePath) => {
     return await runGit(["init"], workspacePath);
 });
 
@@ -67,7 +73,7 @@ ipcMain.handle("git:init", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:get-status", async (event, workspacePath) => {
+handleIpc("git:get-status", async (event, workspacePath) => {
     if (!workspacePath) {
         return {
             isRepo: false,
@@ -222,7 +228,7 @@ ipcMain.handle("git:get-status", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:stage", async (event, workspacePath, filePaths) => {
+handleIpc("git:stage", async (event, workspacePath, filePaths) => {
     if (filePaths === "all") {
         return await runGit(["add", "-A"], workspacePath);
     }
@@ -240,7 +246,7 @@ ipcMain.handle("git:stage", async (event, workspacePath, filePaths) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:unstage", async (event, workspacePath, filePaths) => {
+handleIpc("git:unstage", async (event, workspacePath, filePaths) => {
     if (filePaths === "all") {
         const restoreRes = await runGit(["restore", "--staged", "."], workspacePath);
         if (!restoreRes.success) {
@@ -266,7 +272,7 @@ ipcMain.handle("git:unstage", async (event, workspacePath, filePaths) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:discard", async (event, workspacePath, filePaths, isUntracked = false) => {
+handleIpc("git:discard", async (event, workspacePath, filePaths, isUntracked = false) => {
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
         return { success: true };
     }
@@ -288,7 +294,7 @@ ipcMain.handle("git:discard", async (event, workspacePath, filePaths, isUntracke
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:commit", async (event, workspacePath, message) => {
+handleIpc("git:commit", async (event, workspacePath, message) => {
     if (!message || !message.trim()) {
         return { success: false, error: "Commit message cannot be empty" };
     }
@@ -302,7 +308,7 @@ ipcMain.handle("git:commit", async (event, workspacePath, message) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:pull", async (event, workspacePath) => {
+handleIpc("git:pull", async (event, workspacePath) => {
     return await runGit(["pull"], workspacePath);
 });
 
@@ -312,7 +318,7 @@ ipcMain.handle("git:pull", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:push", async (event, workspacePath) => {
+handleIpc("git:push", async (event, workspacePath) => {
     return await runGit(["push"], workspacePath);
 });
 
@@ -322,7 +328,7 @@ ipcMain.handle("git:push", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:fetch", async (event, workspacePath) => {
+handleIpc("git:fetch", async (event, workspacePath) => {
     return await runGit(["fetch"], workspacePath);
 });
 
@@ -332,7 +338,7 @@ ipcMain.handle("git:fetch", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:get-branches", async (event, workspacePath) => {
+handleIpc("git:get-branches", async (event, workspacePath) => {
     const res = await runGit(["branch", "--list", "-a"], workspacePath);
     if (!res.success) {
         return { success: false, error: res.stderr || res.error, branches: [] };
@@ -370,7 +376,7 @@ ipcMain.handle("git:get-branches", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
-ipcMain.handle("git:checkout", async (event, workspacePath, branchName, createNew = false) => {
+handleIpc("git:checkout", async (event, workspacePath, branchName, createNew = false) => {
     if (!branchName || !branchName.trim()) {
         return { success: false, error: "Branch name is required" };
     }
@@ -383,4 +389,159 @@ ipcMain.handle("git:checkout", async (event, workspacePath, branchName, createNe
     }
 });
 
-module.exports = {};
+/*
+|--------------------------------------------------------------------------
+| IPC: Get File Content at Git Reference (HEAD, branch, or index)
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:get-file-content", async (event, workspacePath, ref, relativePath) => {
+    if (!workspacePath || !relativePath) {
+        return { success: false, exists: false, error: "Missing workspacePath or relativePath", content: "" };
+    }
+
+    const normRel = relativePath.replace(/\\/g, "/");
+    const targetRef = ref ? `${ref}:${normRel}` : `:${normRel}`;
+    const res = await runGit(["show", targetRef], workspacePath);
+    if (!res.success) {
+        return {
+            success: false,
+            exists: false,
+            error: res.stderr || res.error,
+            content: ""
+        };
+    }
+
+    return {
+        success: true,
+        exists: true,
+        content: res.stdout
+    };
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Compare Branches
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:compare-branches", async (event, workspacePath, baseBranch, compareBranch) => {
+    if (!workspacePath || !baseBranch || !compareBranch) {
+        return { success: false, error: "Base and compare branches are required", files: [] };
+    }
+
+    const res = await runGit(["diff", "--name-status", `${baseBranch}...${compareBranch}`], workspacePath);
+    let stdout = res.stdout;
+    if (!res.success) {
+        const res2 = await runGit(["diff", "--name-status", `${baseBranch}..${compareBranch}`], workspacePath);
+        if (!res2.success) {
+            return { success: false, error: res2.stderr || res2.error, files: [] };
+        }
+        stdout = res2.stdout;
+    }
+
+    const lines = stdout.split(/\r?\n/).filter(line => line.trim().length > 0);
+    const files = [];
+
+    for (const line of lines) {
+        const parts = line.split(/\t+/);
+        if (parts.length < 2) continue;
+
+        const status = parts[0].trim().toUpperCase();
+        const relPath = parts[parts.length - 1].trim().replace(/^"|"$/g, "");
+        const fileName = path.basename(relPath);
+        const fullPath = path.resolve(workspacePath, relPath);
+
+        files.push({
+            path: fullPath,
+            relativePath: relPath.replace(/\\/g, "/"),
+            fileName,
+            status: status[0]
+        });
+    }
+
+    return {
+        success: true,
+        files
+    };
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Apply Patch (e.g. Stage Selected Lines)
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:apply-patch", async (event, workspacePath, patchString, cached = true) => {
+    if (!workspacePath || !patchString) {
+        return { success: false, error: "workspacePath and patchString are required" };
+    }
+
+    const args = ["apply", "--whitespace=nowarn", "--unidiff-zero"];
+    if (cached) {
+        args.push("--cached");
+    }
+    args.push("-");
+
+    return new Promise((resolve) => {
+        try {
+            const child = require("child_process").spawn("git", args, {
+                cwd: workspacePath,
+                windowsHide: true
+            });
+
+            let stderr = "";
+            let stdout = "";
+
+            child.stdout.on("data", (d) => { stdout += d.toString(); });
+            child.stderr.on("data", (d) => { stderr += d.toString(); });
+
+            child.on("error", (err) => {
+                resolve({ success: false, error: err.message });
+            });
+
+            child.on("close", (code) => {
+                if (code === 0) {
+                    resolve({ success: true, stdout });
+                } else {
+                    resolve({ success: false, error: stderr || `git apply exited with code ${code}`, code });
+                }
+            });
+
+            child.stdin.write(patchString);
+            child.stdin.end();
+        } catch (err) {
+            resolve({ success: false, error: err.message });
+        }
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Get Raw Diff
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:get-raw-diff", async (event, workspacePath, relativePath, staged = false) => {
+    if (!workspacePath || !relativePath) {
+        return { success: false, error: "Missing parameters", diff: "" };
+    }
+
+    const normRel = relativePath.replace(/\\/g, "/");
+    const args = ["diff", "--no-color", "-U3"];
+    if (staged) {
+        args.push("--cached");
+    } else {
+        args.push("HEAD");
+    }
+    args.push("--", normRel);
+
+    const res = await runGit(args, workspacePath);
+    return {
+        success: res.success,
+        diff: res.stdout || "",
+        error: res.error || res.stderr
+    };
+});
+
+module.exports = { runGit };

@@ -27,6 +27,7 @@ const lspManager =
 require("./ipc/fileSystem.cjs");
 require("./ipc/search.cjs");
 require("./ipc/git.cjs");
+require("./ipc/compiler.cjs");
 
 
 /*

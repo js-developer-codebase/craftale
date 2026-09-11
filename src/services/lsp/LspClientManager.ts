@@ -47,6 +47,7 @@ class LspClientManagerClass {
                 if (client && status === "stopped" && client.status === "ready") {
                     // Server crashed or exited unexpectedly
                     console.warn(`[LSP Manager] Server ${serverId} exited unexpectedly`);
+                    client.notifyStatusChange("stopped", error);
                 }
             });
         }
@@ -202,23 +203,16 @@ class LspClientManagerClass {
     |--------------------------------------------------------------------------
     */
     public async restartServer(serverId: string): Promise<boolean> {
-        const client = this.clients.get(serverId);
-        if (client) {
-            await client.shutdown();
-        }
-
-        const newClient = new LspClient(serverId);
-        this.clients.set(serverId, newClient);
-
+        const client = this.getClient(serverId);
         const ws = this.workspacePath || "";
-        const started = await newClient.startAndInitialize(ws);
+        const started = await client.restart(ws);
 
         if (started) {
             // Re-open all documents belonging to this server
             for (const doc of this.openDocuments.values()) {
                 if (doc.serverId === serverId) {
                     doc.version = 1;
-                    newClient.didOpen(doc.uri, doc.languageId, doc.version, doc.content);
+                    client.didOpen(doc.uri, doc.languageId, doc.version, doc.content);
                 }
             }
         }

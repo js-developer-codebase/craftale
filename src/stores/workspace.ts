@@ -1,5 +1,12 @@
-import { writable, get } from "svelte/store";
+import { writable, derived, get } from "svelte/store";
 import { recordSelfTouch } from "./watcher";
+import {
+    toggleBottomPanel,
+    openBottomPanel,
+    closeBottomPanel,
+    isBottomPanelVisible,
+    activeBottomTab
+} from "./panel";
 
 
 /*
@@ -147,20 +154,25 @@ export const workspacePath =
 |--------------------------------------------------------------------------
 */
 
-export const isTerminalVisible =
-    writable<boolean>(true);
+export const isTerminalVisible = derived(
+    [isBottomPanelVisible, activeBottomTab],
+    ([$visible, $tab]) => $visible && $tab === "terminal"
+);
 
 
 export function toggleTerminal(
     visible?: boolean
 ) {
 
-    isTerminalVisible.update(
-        (current) =>
-            visible !== undefined
-                ? visible
-                : !current
-    );
+    if (visible !== undefined) {
+        if (visible) {
+            openBottomPanel("terminal");
+        } else {
+            closeBottomPanel();
+        }
+    } else {
+        toggleBottomPanel("terminal");
+    }
 
 }
 

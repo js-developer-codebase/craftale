@@ -1,9 +1,10 @@
 <script lang="ts">
     import {
         lspServers,
-        lspDiagnosticsSummary,
         type LspServerInfo
     } from "../stores/lsp";
+    import { problemsSummary } from "../stores/problems";
+    import { openBottomPanel } from "../stores/panel";
     import { lspManager } from "../services/lsp/LspClientManager";
     import { notify } from "../stores/notifications";
 
@@ -16,6 +17,10 @@
 
     function closeMenu() {
         showMenu = false;
+    }
+
+    function handleOpenProblems() {
+        openBottomPanel("problems");
     }
 
     async function handleRestart(serverId: string) {
@@ -44,21 +49,26 @@
 </script>
 
 <div class="lsp-status-bar">
-    <!-- Diagnostics summary (Errors & Warnings) -->
-    <div class="status-item diagnostics-item" title="Workspace Diagnostics">
+    <!-- Diagnostics summary (Errors & Warnings) - Click to Open Problems Panel -->
+    <button
+        type="button"
+        class="status-item diagnostics-item"
+        onclick={handleOpenProblems}
+        title="Workspace Problems (Click to open Problems Panel)"
+    >
         <span class="diag-error">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0-1A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM7 4h2v5H7V4zm0 6h2v2H7v-2z"/>
             </svg>
-            {$lspDiagnosticsSummary.errorCount}
+            {$problemsSummary.errorCount}
         </span>
         <span class="diag-warning">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M7.56 1.44a1 1 0 0 1 1.78 0l6.5 12.5A1 1 0 0 1 15 15H1a1 1 0 0 1-.89-1.44l6.5-12.5zM8 4.5 2.5 14h11L8 4.5zM7.5 7h1v4h-1V7zm0 5h1v1.5h-1V12z"/>
             </svg>
-            {$lspDiagnosticsSummary.warningCount}
+            {$problemsSummary.warningCount}
         </span>
-    </div>
+    </button>
 
     <!-- Active Language Server Status Pill -->
     <button

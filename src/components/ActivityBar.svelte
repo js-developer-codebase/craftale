@@ -8,6 +8,12 @@
     import { totalMatches } from "../stores/search";
     import { totalChangesCount, isGitRepo } from "../stores/git";
     import { openedFiles, toggleTerminal } from "../stores/workspace";
+    import {
+        toggleBottomPanel,
+        isBottomPanelVisible,
+        activeBottomTab
+    } from "../stores/panel";
+    import { problemsSummary } from "../stores/problems";
 
     const dirtyCount = $derived($openedFiles.filter((f) => f.isDirty).length);
 </script>
@@ -84,12 +90,40 @@
 
     <!-- Bottom Views / Toggles -->
     <div class="bottom-views">
+        <!-- Problems Toggle -->
+        <button
+            type="button"
+            class="action-item"
+            class:active={$isBottomPanelVisible && $activeBottomTab === "problems"}
+            title="Problems (Ctrl+Shift+M)"
+            onclick={() => toggleBottomPanel("problems")}
+            aria-label="Problems"
+        >
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+
+            {#if $problemsSummary.errorCount > 0 || $problemsSummary.warningCount > 0}
+                <span
+                    class="badge"
+                    class:error={$problemsSummary.errorCount > 0}
+                    class:warning={$problemsSummary.errorCount === 0 && $problemsSummary.warningCount > 0}
+                    title={`${$problemsSummary.errorCount} errors, ${$problemsSummary.warningCount} warnings`}
+                >
+                    {$problemsSummary.errorCount > 0 ? $problemsSummary.errorCount : $problemsSummary.warningCount}
+                </span>
+            {/if}
+        </button>
+
         <!-- Terminal Toggle -->
         <button
             type="button"
             class="action-item"
+            class:active={$isBottomPanelVisible && $activeBottomTab === "terminal"}
             title="Toggle Terminal (Ctrl+`)"
-            onclick={() => toggleTerminal()}
+            onclick={() => toggleBottomPanel("terminal")}
             aria-label="Toggle Terminal"
         >
             <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -195,5 +229,15 @@
         background: #4d4d4d;
         color: #ffffff;
         border: 1px solid #666666;
+    }
+
+    .badge.error {
+        background: #f48771;
+        color: #ffffff;
+    }
+
+    .badge.warning {
+        background: #cca700;
+        color: #1e1e1e;
     }
 </style>

@@ -32,10 +32,13 @@
         type GitFileEntry
     } from "../stores/git";
     import { workspacePath } from "../stores/workspace";
+    import { openWorkingTreeDiff, openStagedDiff } from "../stores/diff";
+    import BranchCompareModal from "./BranchCompareModal.svelte";
 
     let isStagedCollapsed = $state(false);
     let isChangesCollapsed = $state(false);
     let isMenuOpen = $state(false);
+    let isCompareBranchesOpen = $state(false);
     let commitTextareaEl = $state<HTMLTextAreaElement | null>(null);
 
     onMount(() => {
@@ -179,6 +182,19 @@
                     </span>
                 </button>
 
+                <!-- Compare Branches Button -->
+                <button
+                    type="button"
+                    class="icon-btn"
+                    title="Compare Branches..."
+                    onclick={() => (isCompareBranchesOpen = true)}
+                    aria-label="Compare Branches"
+                >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path fill-rule="evenodd" d="M11.5 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM9.05 3a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0V3h9.05zM4.5 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM2.05 8a2.5 2.5 0 0 1 4.9 0H16v1H6.95a2.5 2.5 0 0 1-4.9 0H0V8h2.05zm9.45 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm-2.45 1a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0v-1h9.05z"/>
+                    </svg>
+                </button>
+
                 <!-- Refresh Button -->
                 <button
                     type="button"
@@ -207,6 +223,10 @@
 
                     {#if isMenuOpen}
                         <div class="dropdown-menu" role="menu" onclick={() => (isMenuOpen = false)}>
+                            <button type="button" class="menu-item" onclick={() => (isCompareBranchesOpen = true)}>
+                                Compare Branches...
+                            </button>
+                            <div class="menu-divider"></div>
                             <button type="button" class="menu-item" onclick={pullChanges}>
                                 Pull
                             </button>
@@ -309,9 +329,9 @@
                                     class="file-row"
                                     role="listitem"
                                     tabindex="0"
-                                    onclick={() => openGitFile(file)}
+                                    onclick={() => openStagedDiff(file)}
                                     onkeydown={(e) => {
-                                        if (e.key === "Enter") openGitFile(file);
+                                        if (e.key === "Enter") openStagedDiff(file);
                                     }}
                                 >
                                     <span class="file-icon">{getFileIcon(file.fileName)}</span>
@@ -324,6 +344,15 @@
                                     {/if}
 
                                     <div class="row-actions" onclick={(e) => e.stopPropagation()} role="toolbar">
+                                        <button
+                                            type="button"
+                                            class="action-btn"
+                                            title="Open File"
+                                            onclick={() => openGitFile(file)}
+                                            aria-label="Open File"
+                                        >
+                                            📄
+                                        </button>
                                         <button
                                             type="button"
                                             class="action-btn"
@@ -397,9 +426,9 @@
                                     class="file-row"
                                     role="listitem"
                                     tabindex="0"
-                                    onclick={() => openGitFile(file)}
+                                    onclick={() => openWorkingTreeDiff(file)}
                                     onkeydown={(e) => {
-                                        if (e.key === "Enter") openGitFile(file);
+                                        if (e.key === "Enter") openWorkingTreeDiff(file);
                                     }}
                                 >
                                     <span class="file-icon">{getFileIcon(file.fileName)}</span>
@@ -412,6 +441,15 @@
                                     {/if}
 
                                     <div class="row-actions" onclick={(e) => e.stopPropagation()} role="toolbar">
+                                        <button
+                                            type="button"
+                                            class="action-btn"
+                                            title="Open File"
+                                            onclick={() => openGitFile(file)}
+                                            aria-label="Open File"
+                                        >
+                                            📄
+                                        </button>
                                         <button
                                             type="button"
                                             class="action-btn"
@@ -458,6 +496,8 @@
         </div>
     {/if}
 </div>
+
+<BranchCompareModal bind:isOpen={isCompareBranchesOpen} onClose={() => (isCompareBranchesOpen = false)} />
 
 <style>
     .source-control-panel {

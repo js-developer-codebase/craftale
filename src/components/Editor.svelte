@@ -78,6 +78,9 @@
     import { registerMonacoLspAdapters } from "../services/lsp/monacoAdapters";
     import { pathToUri } from "../services/lsp/protocol";
     import { clearFileDiagnostics } from "../stores/lsp";
+    import { clearFileProblems } from "../stores/problems";
+    import { activeDiff, closeDiff } from "../stores/diff";
+    import DiffViewer from "./DiffViewer.svelte";
 
 
     /*
@@ -508,8 +511,6 @@
             );
 
             lspManager.notifyDocumentSave(path, content);
-
-            notify.success(`Saved "${fileName}"`);
 
         } else {
 
@@ -1343,6 +1344,7 @@
 
         lspManager.notifyDocumentClose(filePath);
         clearFileDiagnostics(pathToUri(filePath));
+        clearFileProblems(filePath);
 
     }
 
@@ -2315,7 +2317,10 @@
                                 ? `${file.name} (Preview)`
                                 : file.name
                     }
-                    onclick={() => activateFile(file.path)}
+                    onclick={() => {
+                        closeDiff();
+                        activateFile(file.path);
+                    }}
                     ondblclick={() => {
                         if (file.isPreview) {
                             promotePreviewTab(file.path);
@@ -2337,6 +2342,7 @@
                     onkeydown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
+                            closeDiff();
                             activateFile(file.path);
                         }
                     }}
@@ -2400,6 +2406,33 @@
                 </div>
 
             {/each}
+
+            <!-- Active Diff Tab -->
+            {#if $activeDiff}
+                <div
+                    class="tab diff-tab active"
+                    role="tab"
+                    tabindex="0"
+                    title={`${$activeDiff.fileName} (${$activeDiff.originalLabel} ↔ ${$activeDiff.modifiedLabel})`}
+                >
+                    <span class="diff-tab-icon">☵</span>
+                    <span class="file-name">
+                        {$activeDiff.fileName}
+                        <span class="diff-tag-sub">({$activeDiff.originalLabel} ↔ {$activeDiff.modifiedLabel})</span>
+                    </span>
+                    <button
+                        type="button"
+                        class="tab-close"
+                        title="Close Diff"
+                        onclick={(event) => {
+                            event.stopPropagation();
+                            closeDiff();
+                        }}
+                    >
+                        <span class="close-icon">×</span>
+                    </button>
+                </div>
+            {/if}
 
         </div>
 
@@ -2508,10 +2541,23 @@
     |--------------------------------------------------------------------------
     -->
 
-    <Breadcrumbs
-        onJumpToSymbol={jumpToSymbol}
-        onNavigateLocation={jumpToLocation}
-    />
+    {#if !$activeDiff}
+        <Breadcrumbs
+            onJumpToSymbol={jumpToSymbol}
+            onNavigateLocation={jumpToLocation}
+        />
+    {/if}
+
+
+    <!--
+    |--------------------------------------------------------------------------
+    | Diff Viewer
+    |--------------------------------------------------------------------------
+    -->
+
+    {#if $activeDiff}
+        <DiffViewer />
+    {/if}
 
 
     <!--
@@ -2522,6 +2568,7 @@
 
     <div
         class="monaco-container"
+        class:hidden-behind-diff={$activeDiff !== null}
         bind:this={editorContainer}
     ></div>
 
@@ -3277,6 +3324,27 @@
 
         width: 100%;
 
+    }
+
+    .hidden-behind-diff {
+        display: none !important;
+    }
+
+    .diff-tab {
+        background: #1e1e2e;
+        border-bottom: 2px solid #569cd6;
+    }
+
+    .diff-tab-icon {
+        margin-right: 6px;
+        color: #569cd6;
+        font-size: 13px;
+    }
+
+    .diff-tag-sub {
+        opacity: 0.7;
+        font-size: 10px;
+        margin-left: 4px;
     }
 
 </style>

@@ -42,6 +42,22 @@
     import LspStatusBar
         from "./components/LspStatusBar.svelte";
 
+    import ProblemsPanel
+        from "./components/ProblemsPanel.svelte";
+
+    import {
+        activeBottomTab,
+        isBottomPanelVisible,
+        bottomPanelHeight,
+        toggleBottomPanel,
+        openBottomPanel,
+        setBottomPanelHeight
+    } from "./stores/panel";
+
+    import {
+        problemsSummary
+    } from "./stores/problems";
+
     import {
         lspManager
     } from "./services/lsp/LspClientManager";
@@ -95,11 +111,37 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Terminal State
+    | Bottom Panel Resizer State
     |--------------------------------------------------------------------------
     */
 
-    let terminalHeight = 250;
+    let isResizingPanel = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    function handleResizerMouseDown(e: MouseEvent) {
+        e.preventDefault();
+        isResizingPanel = true;
+        startY = e.clientY;
+        startHeight = get(bottomPanelHeight);
+
+        window.addEventListener("mousemove", handleResizerMouseMove);
+        window.addEventListener("mouseup", handleResizerMouseUp);
+    }
+
+    function handleResizerMouseMove(e: MouseEvent) {
+        if (!isResizingPanel) return;
+        const delta = startY - e.clientY;
+        setBottomPanelHeight(startHeight + delta);
+    }
+
+    function handleResizerMouseUp() {
+        if (isResizingPanel) {
+            isResizingPanel = false;
+            window.removeEventListener("mousemove", handleResizerMouseMove);
+            window.removeEventListener("mouseup", handleResizerMouseUp);
+        }
+    }
 
 
     /*
@@ -128,6 +170,18 @@
 
             return;
 
+        }
+
+        /* Toggle Problems: Ctrl + Shift + M */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "m"
+        ) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleBottomPanel("problems");
+            return;
         }
 
         /* Quick Open File: Ctrl + P */
@@ -467,17 +521,75 @@
 
         <!--
         |--------------------------------------------------------------------------
-        | Terminal
+        | Bottom Panel (Problems & Terminal)
         |--------------------------------------------------------------------------
         -->
 
         <section
-            class="terminal-area"
-            class:hidden={!$isTerminalVisible}
-            style={`height: ${terminalHeight}px`}
+            class="bottom-panel"
+            class:hidden={!$isBottomPanelVisible}
+            style={`height: ${$bottomPanelHeight}px`}
         >
+            <!-- Panel Resizer -->
+            <div
+                class="panel-resizer"
+                onmousedown={handleResizerMouseDown}
+                role="separator"
+                aria-orientation="horizontal"
+                tabindex="-1"
+                title="Drag to resize panel"
+            ></div>
 
-            <Terminal cwd={$workspacePath ?? ""} />
+            <!-- Panel Header with Tabs -->
+            <header class="bottom-panel-header">
+                <div class="panel-tabs">
+                    <button
+                        type="button"
+                        class="panel-tab"
+                        class:active={$activeBottomTab === "problems"}
+                        onclick={() => $activeBottomTab = "problems"}
+                    >
+                        <span>PROBLEMS</span>
+                        {#if $problemsSummary.totalCount > 0}
+                            <span class="tab-badge" class:has-errors={$problemsSummary.errorCount > 0}>
+                                {$problemsSummary.totalCount}
+                            </span>
+                        {/if}
+                    </button>
+
+                    <button
+                        type="button"
+                        class="panel-tab"
+                        class:active={$activeBottomTab === "terminal"}
+                        onclick={() => $activeBottomTab = "terminal"}
+                    >
+                        <span>TERMINAL</span>
+                    </button>
+                </div>
+
+                <div class="panel-header-actions">
+                    <button
+                        type="button"
+                        class="btn-panel-action"
+                        onclick={() => $isBottomPanelVisible = false}
+                        title="Close Panel"
+                    >
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Panel Content Bodies -->
+            <div class="bottom-panel-body">
+                <div class="panel-view" class:hidden={$activeBottomTab !== "problems"}>
+                    <ProblemsPanel />
+                </div>
+                <div class="panel-view" class:hidden={$activeBottomTab !== "terminal"}>
+                    <Terminal cwd={$workspacePath ?? ""} />
+                </div>
+            </div>
 
         </section>
 
@@ -705,32 +817,136 @@
 
     /*
     |--------------------------------------------------------------------------
-    | Terminal Area
+    | Bottom Panel (Problems & Terminal)
     |--------------------------------------------------------------------------
     */
 
-    .terminal-area {
-
-        flex-shrink:
-            0;
-
-        min-height:
-            150px;
-
-        border-top:
-            1px solid #333333;
-
-        overflow:
-            hidden;
-
+    .bottom-panel {
+        position: relative;
+        flex-shrink: 0;
+        min-height: 120px;
+        max-height: 80vh;
+        border-top: 1px solid #333333;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: #1e1e1e;
     }
 
+    .bottom-panel.hidden {
+        display: none !important;
+    }
 
-    .terminal-area.hidden {
+    .panel-resizer {
+        position: absolute;
+        top: -3px;
+        left: 0;
+        right: 0;
+        height: 6px;
+        cursor: row-resize;
+        z-index: 20;
+    }
 
-        display:
-            none !important;
+    .panel-resizer:hover {
+        background: rgba(0, 122, 204, 0.4);
+    }
 
+    .bottom-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 28px;
+        min-height: 28px;
+        background: #252526;
+        border-bottom: 1px solid #333333;
+        padding: 0 8px;
+        user-select: none;
+    }
+
+    .panel-tabs {
+        display: flex;
+        align-items: center;
+        height: 100%;
+        gap: 2px;
+    }
+
+    .panel-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 100%;
+        padding: 0 12px;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: #999999;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        transition: color 0.15s ease;
+    }
+
+    .panel-tab:hover {
+        color: #ffffff;
+    }
+
+    .panel-tab.active {
+        color: #ffffff;
+        border-bottom-color: #007acc;
+    }
+
+    .tab-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        background: #444444;
+        color: #ffffff;
+        font-weight: 700;
+    }
+
+    .tab-badge.has-errors {
+        background: #f48771;
+        color: #ffffff;
+    }
+
+    .panel-header-actions {
+        display: flex;
+        align-items: center;
+    }
+
+    .btn-panel-action {
+        background: transparent;
+        border: none;
+        color: #888888;
+        padding: 4px;
+        border-radius: 3px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-panel-action:hover {
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .bottom-panel-body {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+        height: calc(100% - 28px);
+    }
+
+    .panel-view {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    }
+
+    .panel-view.hidden {
+        display: none !important;
     }
 
 

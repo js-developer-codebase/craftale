@@ -239,23 +239,29 @@ async function startServer(languageId, workspacePath) {
 
         child.on("error", (err) => {
             console.error(`[LSP ${serverId}] Process error:`, err);
-            sendToRenderer("lsp:status", {
-                serverId,
-                status: "error",
-                error: err.message
-            });
-            activeServers.delete(serverId);
+            const current = activeServers.get(serverId);
+            if (current && current.process === child) {
+                activeServers.delete(serverId);
+                sendToRenderer("lsp:status", {
+                    serverId,
+                    status: "error",
+                    error: err.message
+                });
+            }
         });
 
         child.on("exit", (code, signal) => {
             console.log(`[LSP ${serverId}] Exited with code ${code}, signal ${signal}`);
-            sendToRenderer("lsp:status", {
-                serverId,
-                status: "stopped",
-                code,
-                signal
-            });
-            activeServers.delete(serverId);
+            const current = activeServers.get(serverId);
+            if (current && current.process === child) {
+                activeServers.delete(serverId);
+                sendToRenderer("lsp:status", {
+                    serverId,
+                    status: "stopped",
+                    code,
+                    signal
+                });
+            }
         });
 
         activeServers.set(serverId, {
@@ -305,18 +311,42 @@ async function stopServer(serverId) {
         const { process: child } = entry;
         activeServers.delete(serverId);
 
-        if (!child.killed) {
-            child.kill("SIGTERM");
-            // Force kill after 2 seconds if not exited
-            setTimeout(() => {
-                if (!child.killed) {
+        if (child && !child.killed && child.exitCode === null) {
+            await new Promise((resolve) => {
+                let finished = false;
+                const finish = () => {
+                    if (!finished) {
+                        finished = true;
+                        resolve();
+                    }
+                };
+
+                const timer = setTimeout(() => {
                     try {
-                        child.kill("SIGKILL");
+                        if (process.platform === "win32" && child.pid) {
+                            const { execSync } = require("child_process");
+                            execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: "ignore" });
+                        } else if (!child.killed) {
+                            child.kill("SIGKILL");
+                        }
                     } catch (e) {
                         // ignore
                     }
+                    finish();
+                }, 1500);
+
+                child.once("exit", () => {
+                    clearTimeout(timer);
+                    finish();
+                });
+
+                try {
+                    child.kill("SIGTERM");
+                } catch (e) {
+                    clearTimeout(timer);
+                    finish();
                 }
-            }, 2000);
+            });
         }
 
         sendToRenderer("lsp:status", {
@@ -331,6 +361,18 @@ async function stopServer(serverId) {
             error: err.message
         };
     }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Restart Language Server
+|--------------------------------------------------------------------------
+*/
+
+async function restartServer(languageId, workspacePath) {
+    const serverId = LANGUAGE_ID_TO_SERVER[languageId] || languageId;
+    await stopServer(serverId);
+    return await startServer(languageId, workspacePath);
 }
 
 /*
@@ -409,6 +451,10 @@ if (ipcMain) {
         return await stopServer(serverId);
     });
 
+    ipcMain.handle("lsp:restart-server", async (_event, { serverId, workspacePath }) => {
+        return await restartServer(serverId, workspacePath);
+    });
+
     ipcMain.handle("lsp:stop-all", async () => {
         return await stopAllServers();
     });
@@ -426,6 +472,7 @@ module.exports = {
     initialize,
     startServer,
     stopServer,
+    restartServer,
     stopAllServers,
     sendMessage,
     getServersStatus
