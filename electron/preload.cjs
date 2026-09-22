@@ -666,6 +666,34 @@ contextBridge.exposeInMainWorld(
                 return ipcRenderer.invoke("git:checkout", workspacePath, branchName, createNew);
             },
 
+            createBranch: (workspacePath, branchName, checkout = true, startPoint = "HEAD") => {
+                return ipcRenderer.invoke("git:create-branch", workspacePath, branchName, checkout, startPoint);
+            },
+
+            deleteBranch: (workspacePath, branchName, force = false) => {
+                return ipcRenderer.invoke("git:delete-branch", workspacePath, branchName, force);
+            },
+
+            renameBranch: (workspacePath, oldName, newName) => {
+                return ipcRenderer.invoke("git:rename-branch", workspacePath, oldName, newName);
+            },
+
+            merge: (workspacePath, branchName, options = {}) => {
+                return ipcRenderer.invoke("git:merge", workspacePath, branchName, options);
+            },
+
+            abortMerge: (workspacePath) => {
+                return ipcRenderer.invoke("git:abort-merge", workspacePath);
+            },
+
+            rebase: (workspacePath, upstreamBranch) => {
+                return ipcRenderer.invoke("git:rebase", workspacePath, upstreamBranch);
+            },
+
+            rebaseAction: (workspacePath, action) => {
+                return ipcRenderer.invoke("git:rebase-action", workspacePath, action);
+            },
+
             getFileContent: (workspacePath, ref, relativePath) => {
                 return ipcRenderer.invoke("git:get-file-content", workspacePath, ref, relativePath);
             },

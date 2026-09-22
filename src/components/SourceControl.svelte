@@ -9,6 +9,9 @@
         stagedFiles,
         unstagedFiles,
         untrackedFiles,
+        conflictFiles,
+        repoState,
+        hasConflicts,
         totalChangesCount,
         commitMessage,
         isLoadingStatus,
@@ -29,12 +32,17 @@
         openBranchModal,
         initRepository,
         openGitFile,
-        type GitFileEntry
+        abortMerge,
+        rebaseAction,
+        markConflictResolved,
+        type GitFileEntry,
+        type GitConflictEntry
     } from "../stores/git";
     import { workspacePath } from "../stores/workspace";
     import { openWorkingTreeDiff, openStagedDiff } from "../stores/diff";
     import BranchCompareModal from "./BranchCompareModal.svelte";
 
+    let isConflictsCollapsed = $state(false);
     let isStagedCollapsed = $state(false);
     let isChangesCollapsed = $state(false);
     let isMenuOpen = $state(false);
@@ -284,6 +292,81 @@
             </button>
         </div>
 
+        <!-- Active Merge / Rebase Status Banner -->
+        {#if $repoState.isMerging}
+            <div class="repo-operation-banner merge-banner">
+                <div class="op-header">
+                    <span class="op-icon">🔀</span>
+                    <div class="op-title-block">
+                        <span class="op-title">Merge in progress</span>
+                        {#if $repoState.mergeBranch}
+                            <span class="op-sub">Merging '{$repoState.mergeBranch}' into '{$currentBranch}'</span>
+                        {:else if $repoState.mergeHead}
+                            <span class="op-sub">Commit: {$repoState.mergeHead}</span>
+                        {/if}
+                    </div>
+                </div>
+                <div class="op-actions">
+                    <button
+                        type="button"
+                        class="btn-op btn-op-abort"
+                        onclick={abortMerge}
+                        title="Abort the current merge"
+                    >
+                        ✕ Abort
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-op btn-op-complete"
+                        disabled={$hasConflicts}
+                        onclick={commitChanges}
+                        title={$hasConflicts ? "Resolve all conflicts before completing merge" : "Complete Merge"}
+                    >
+                        ✓ Complete Merge
+                    </button>
+                </div>
+            </div>
+        {:else if $repoState.isRebasing}
+            <div class="repo-operation-banner rebase-banner">
+                <div class="op-header">
+                    <span class="op-icon">⚡</span>
+                    <div class="op-title-block">
+                        <span class="op-title">Rebase in progress</span>
+                        {#if $repoState.rebaseOnto}
+                            <span class="op-sub">Onto: {$repoState.rebaseOnto}</span>
+                        {/if}
+                    </div>
+                </div>
+                <div class="op-actions">
+                    <button
+                        type="button"
+                        class="btn-op btn-op-abort"
+                        onclick={() => rebaseAction('abort')}
+                        title="Abort the current rebase"
+                    >
+                        ✕ Abort
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-op"
+                        onclick={() => rebaseAction('skip')}
+                        title="Skip the current commit"
+                    >
+                        ⏭ Skip
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-op btn-op-complete"
+                        disabled={$hasConflicts}
+                        onclick={() => rebaseAction('continue')}
+                        title={$hasConflicts ? "Resolve all conflicts before continuing" : "Continue Rebase"}
+                    >
+                        ✓ Continue
+                    </button>
+                </div>
+            </div>
+        {/if}
+
         <!-- Error Banner -->
         {#if $gitError}
             <div class="git-error-banner" role="alert">
@@ -293,6 +376,79 @@
 
         <!-- Status Lists -->
         <div class="changes-scroller">
+            <!-- Merge Conflicts Accordion -->
+            {#if $conflictFiles.length > 0}
+                <div class="accordion-group conflicts-group">
+                    <div
+                        class="accordion-header conflicts-header"
+                        role="button"
+                        tabindex="0"
+                        onclick={() => (isConflictsCollapsed = !isConflictsCollapsed)}
+                        onkeydown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") isConflictsCollapsed = !isConflictsCollapsed;
+                        }}
+                    >
+                        <span class="chevron" class:expanded={!isConflictsCollapsed}>▸</span>
+                        <span class="conflicts-warning-icon">⚠️</span>
+                        <span class="group-title conflicts-title">MERGE CONFLICTS</span>
+                        <span class="count-pill conflict-pill">{$conflictFiles.length}</span>
+                    </div>
+
+                    {#if !isConflictsCollapsed}
+                        <div class="file-list" role="list">
+                            {#each $conflictFiles as file (file.path)}
+                                <div
+                                    class="file-row conflict-row"
+                                    role="listitem"
+                                    tabindex="0"
+                                    onclick={() => openGitFile(file)}
+                                    onkeydown={(e) => {
+                                        if (e.key === "Enter") openGitFile(file);
+                                    }}
+                                >
+                                    <span class="file-icon">⚠️</span>
+                                    <span class="file-name" title={file.path}>{file.fileName}</span>
+
+                                    {#if getDirDisplay(file.relativePath)}
+                                        <span class="file-dir" title={file.relativePath}>
+                                            {getDirDisplay(file.relativePath)}
+                                        </span>
+                                    {/if}
+
+                                    <div class="row-actions" onclick={(e) => e.stopPropagation()} role="toolbar">
+                                        <button
+                                            type="button"
+                                            class="action-btn"
+                                            title="Open File to Resolve"
+                                            onclick={() => openGitFile(file)}
+                                            aria-label="Open File"
+                                        >
+                                            📄
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="action-btn btn-resolve-check"
+                                            title="Mark Conflict Resolved (git add)"
+                                            onclick={() => markConflictResolved(file.path)}
+                                            aria-label="Mark Resolved"
+                                        >
+                                            ✓
+                                        </button>
+                                    </div>
+
+                                    <span
+                                        class="status-badge status-conflict"
+                                        title={file.conflictType}
+                                    >
+                                        ! {file.status}
+                                    </span>
+                                </div>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
+            {/if}
+
             <!-- Staged Changes Accordion -->
             {#if $stagedFiles.length > 0}
                 <div class="accordion-group">
@@ -948,5 +1104,138 @@
 
     .btn-primary:hover {
         background: #0098ff;
+    }
+
+    /* Repo Operation Banner (Merge / Rebase) */
+    .repo-operation-banner {
+        padding: 10px 12px;
+        margin: 8px 12px;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .merge-banner {
+        background: rgba(234, 88, 12, 0.15);
+        border: 1px solid rgba(234, 88, 12, 0.5);
+    }
+
+    .rebase-banner {
+        background: rgba(202, 138, 4, 0.15);
+        border: 1px solid rgba(202, 138, 4, 0.5);
+    }
+
+    .op-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .op-icon {
+        font-size: 16px;
+    }
+
+    .op-title-block {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .op-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #ffffff;
+    }
+
+    .op-sub {
+        font-size: 10px;
+        color: #aaaaaa;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .op-actions {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+    }
+
+    .btn-op {
+        background: #333333;
+        border: 1px solid #444444;
+        color: #cccccc;
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+
+    .btn-op:hover {
+        background: #444444;
+        color: #ffffff;
+    }
+
+    .btn-op:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-op-abort:hover {
+        background: #c53929;
+        border-color: #c53929;
+        color: #ffffff;
+    }
+
+    .btn-op-complete {
+        background: #0e639c;
+        border-color: #0e639c;
+        color: #ffffff;
+    }
+
+    .btn-op-complete:hover:not(:disabled) {
+        background: #1177bb;
+    }
+
+    /* Conflicts Accordion */
+    .conflicts-header {
+        background: rgba(239, 68, 68, 0.1) !important;
+        border-left: 3px solid #ef4444;
+    }
+
+    .conflicts-warning-icon {
+        font-size: 12px;
+        margin-right: 2px;
+    }
+
+    .conflicts-title {
+        color: #fca5a5 !important;
+        font-weight: 700;
+    }
+
+    .conflict-pill {
+        background: #dc2626 !important;
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+
+    .conflict-row {
+        background: rgba(239, 68, 68, 0.05);
+    }
+
+    .conflict-row:hover {
+        background: rgba(239, 68, 68, 0.12) !important;
+    }
+
+    .status-conflict {
+        color: #f87171 !important;
+        font-weight: 700;
+        font-size: 11px;
+    }
+
+    .btn-resolve-check:hover {
+        background: #16a34a !important;
+        color: #ffffff !important;
     }
 </style>

@@ -18,11 +18,30 @@ export interface GitFileEntry {
     status: string; // 'M' | 'A' | 'D' | 'R' | 'C' | '?'
 }
 
+export interface GitConflictEntry {
+    path: string;
+    relativePath: string;
+    fileName: string;
+    status: string;
+    conflictType: string;
+}
+
 export interface GitBranchEntry {
     fullName: string;
     name: string;
     isCurrent: boolean;
     isRemote: boolean;
+}
+
+export interface GitRepoState {
+    isMerging: boolean;
+    isRebasing: boolean;
+    isCherryPicking: boolean;
+    isReverting: boolean;
+    mergeHead: string | null;
+    mergeBranch: string | null;
+    rebaseOnto: string | null;
+    rebaseHead: string | null;
 }
 
 /*
@@ -40,6 +59,18 @@ export const behindCount = writable<number>(0);
 export const stagedFiles = writable<GitFileEntry[]>([]);
 export const unstagedFiles = writable<GitFileEntry[]>([]);
 export const untrackedFiles = writable<GitFileEntry[]>([]);
+export const conflictFiles = writable<GitConflictEntry[]>([]);
+
+export const repoState = writable<GitRepoState>({
+    isMerging: false,
+    isRebasing: false,
+    isCherryPicking: false,
+    isReverting: false,
+    mergeHead: null,
+    mergeBranch: null,
+    rebaseOnto: null,
+    rebaseHead: null
+});
 
 export const gitError = writable<string | null>(null);
 export const isLoadingStatus = writable<boolean>(false);
@@ -58,9 +89,9 @@ export const isBranchModalOpen = writable<boolean>(false);
 */
 
 export const totalChangesCount = derived(
-    [stagedFiles, unstagedFiles, untrackedFiles],
-    ([$staged, $unstaged, $untracked]) =>
-        $staged.length + $unstaged.length + $untracked.length
+    [stagedFiles, unstagedFiles, untrackedFiles, conflictFiles],
+    ([$staged, $unstaged, $untracked, $conflicts]) =>
+        $staged.length + $unstaged.length + $untracked.length + $conflicts.length
 );
 
 export const hasStagedChanges = derived(
@@ -71,6 +102,11 @@ export const hasStagedChanges = derived(
 export const hasWorkingTreeChanges = derived(
     [unstagedFiles, untrackedFiles],
     ([$unstaged, $untracked]) => $unstaged.length > 0 || $untracked.length > 0
+);
+
+export const hasConflicts = derived(
+    conflictFiles,
+    ($conflicts) => $conflicts.length > 0
 );
 
 /*
@@ -106,6 +142,17 @@ export async function refreshGitStatus() {
         stagedFiles.set([]);
         unstagedFiles.set([]);
         untrackedFiles.set([]);
+        conflictFiles.set([]);
+        repoState.set({
+            isMerging: false,
+            isRebasing: false,
+            isCherryPicking: false,
+            isReverting: false,
+            mergeHead: null,
+            mergeBranch: null,
+            rebaseOnto: null,
+            rebaseHead: null
+        });
         gitError.set(null);
         return;
     }
@@ -124,6 +171,17 @@ export async function refreshGitStatus() {
             stagedFiles.set([]);
             unstagedFiles.set([]);
             untrackedFiles.set([]);
+            conflictFiles.set([]);
+            repoState.set({
+                isMerging: false,
+                isRebasing: false,
+                isCherryPicking: false,
+                isReverting: false,
+                mergeHead: null,
+                mergeBranch: null,
+                rebaseOnto: null,
+                rebaseHead: null
+            });
             gitError.set(null);
             return;
         }
@@ -136,6 +194,10 @@ export async function refreshGitStatus() {
         stagedFiles.set(status.staged || []);
         unstagedFiles.set(status.unstaged || []);
         untrackedFiles.set(status.untracked || []);
+        conflictFiles.set(status.conflicts || []);
+        if (status.repoState) {
+            repoState.set(status.repoState);
+        }
         gitError.set(status.error || null);
     } catch (err: any) {
         console.warn("[GIT] Status fetch failed:", err);
@@ -381,6 +443,187 @@ export async function checkoutBranch(branchName: string, createNew = false) {
     } catch (err: any) {
         notify.error(`Checkout failed: ${err.message}`);
     }
+}
+
+export async function createBranch(branchName: string, checkout = true, startPoint = "HEAD"): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.createBranch) return false;
+
+    try {
+        const res = await window.craftale.git.createBranch(currentWorkspace, branchName, checkout, startPoint);
+        if (!res.success) {
+            notify.error(`Failed to create branch: ${res.error || res.stderr}`);
+            return false;
+        }
+        notify.success(
+            checkout
+                ? `Created and switched to branch "${branchName}"`
+                : `Created branch "${branchName}"`,
+            { duration: 2500 }
+        );
+        await refreshGitStatus();
+        await loadBranches();
+        return true;
+    } catch (err: any) {
+        notify.error(`Failed to create branch: ${err.message}`);
+        return false;
+    }
+}
+
+export async function deleteBranch(branchName: string, force = false): Promise<{ success: boolean; notMerged?: boolean; error?: string }> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.deleteBranch) return { success: false, error: "No git service" };
+
+    try {
+        const res = await window.craftale.git.deleteBranch(currentWorkspace, branchName, force);
+        if (!res.success) {
+            const errText = `${res.error || ""} ${res.stderr || ""}`;
+            const notMerged = errText.includes("not fully merged");
+            if (!notMerged) {
+                notify.error(`Failed to delete branch: ${res.error || res.stderr}`);
+            }
+            return { success: false, notMerged, error: res.error || res.stderr };
+        }
+        notify.success(`Deleted branch "${branchName}"`, { duration: 2500 });
+        await refreshGitStatus();
+        await loadBranches();
+        return { success: true };
+    } catch (err: any) {
+        notify.error(`Failed to delete branch: ${err.message}`);
+        return { success: false, error: err.message };
+    }
+}
+
+export async function renameBranch(oldName: string, newName: string): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.renameBranch) return false;
+
+    try {
+        const res = await window.craftale.git.renameBranch(currentWorkspace, oldName, newName);
+        if (!res.success) {
+            notify.error(`Failed to rename branch: ${res.error || res.stderr}`);
+            return false;
+        }
+        notify.success(`Renamed branch "${oldName}" to "${newName}"`, { duration: 2500 });
+        await refreshGitStatus();
+        await loadBranches();
+        return true;
+    } catch (err: any) {
+        notify.error(`Failed to rename branch: ${err.message}`);
+        return false;
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Merge & Rebase Workflows
+|--------------------------------------------------------------------------
+*/
+
+export async function mergeBranch(branchName: string, options: { noFf?: boolean; squash?: boolean } = {}): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.merge) return false;
+
+    try {
+        const res = await window.craftale.git.merge(currentWorkspace, branchName, options);
+        await refreshGitStatus();
+
+        if (res.conflict) {
+            notify.warning(`Merge resulted in conflicts. Please resolve conflicts in Source Control.`, { duration: 5000 });
+            return false;
+        } else if (!res.success) {
+            notify.error(`Merge failed: ${res.error || res.stderr}`);
+            return false;
+        }
+
+        notify.success(`Merged branch "${branchName}" successfully!`, { duration: 3000 });
+        await loadBranches();
+        return true;
+    } catch (err: any) {
+        notify.error(`Merge failed: ${err.message}`);
+        return false;
+    }
+}
+
+export async function abortMerge(): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.abortMerge) return false;
+
+    try {
+        const res = await window.craftale.git.abortMerge(currentWorkspace);
+        if (!res.success) {
+            notify.error(`Failed to abort merge: ${res.error || res.stderr}`);
+            return false;
+        }
+        notify.info("Merge aborted.", { duration: 2500 });
+        await refreshGitStatus();
+        return true;
+    } catch (err: any) {
+        notify.error(`Failed to abort merge: ${err.message}`);
+        return false;
+    }
+}
+
+export async function rebaseBranch(upstreamBranch: string): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.rebase) return false;
+
+    try {
+        const res = await window.craftale.git.rebase(currentWorkspace, upstreamBranch);
+        await refreshGitStatus();
+
+        if (res.conflict) {
+            notify.warning(`Rebase conflict encountered. Resolve conflicts and click Continue Rebase.`, { duration: 5000 });
+            return false;
+        } else if (!res.success) {
+            notify.error(`Rebase failed: ${res.error || res.stderr}`);
+            return false;
+        }
+
+        notify.success(`Rebased onto "${upstreamBranch}" successfully!`, { duration: 3000 });
+        await loadBranches();
+        return true;
+    } catch (err: any) {
+        notify.error(`Rebase failed: ${err.message}`);
+        return false;
+    }
+}
+
+export async function rebaseAction(action: "continue" | "abort" | "skip"): Promise<boolean> {
+    const currentWorkspace = get(workspacePath);
+    if (!currentWorkspace || !window.craftale?.git?.rebaseAction) return false;
+
+    try {
+        const res = await window.craftale.git.rebaseAction(currentWorkspace, action);
+        await refreshGitStatus();
+
+        if (res.conflict) {
+            notify.warning(`Conflicts still present. Resolve conflicts before continuing.`, { duration: 5000 });
+            return false;
+        } else if (!res.success) {
+            notify.error(`Rebase ${action} failed: ${res.error || res.stderr}`);
+            return false;
+        }
+
+        if (action === "abort") {
+            notify.info("Rebase aborted.", { duration: 2500 });
+        } else if (action === "continue") {
+            notify.success("Rebase continued.", { duration: 2500 });
+        } else {
+            notify.info("Commit skipped.", { duration: 2500 });
+        }
+        await loadBranches();
+        return true;
+    } catch (err: any) {
+        notify.error(`Rebase ${action} failed: ${err.message}`);
+        return false;
+    }
+}
+
+export async function markConflictResolved(filePath: string): Promise<boolean> {
+    await stageFiles([filePath]);
+    notify.success("Marked conflict as resolved.", { duration: 2000 });
+    return true;
 }
 
 export function openBranchModal() {

@@ -81,6 +81,8 @@
     import { clearFileProblems } from "../stores/problems";
     import { activeDiff, closeDiff } from "../stores/diff";
     import DiffViewer from "./DiffViewer.svelte";
+    import { parseConflicts, resolveConflict, type ConflictBlock } from "../utils/conflictParser";
+    import { markConflictResolved } from "../stores/git";
 
 
     /*
@@ -365,6 +367,235 @@
 
     /*
     |--------------------------------------------------------------------------
+    | Git Merge Conflict Resolution & CodeLens
+    |--------------------------------------------------------------------------
+    */
+
+    let conflictDecorations: string[] = [];
+    let conflictCodeLensDisposable: monaco.IDisposable | null = null;
+
+    function updateConflictDecorations(model: monaco.editor.ITextModel | null) {
+        if (!editor || !model) return;
+
+        const text = model.getValue();
+        if (!text.includes("<<<<<<<")) {
+            if (conflictDecorations.length > 0) {
+                conflictDecorations = editor.deltaDecorations(conflictDecorations, []);
+            }
+            return;
+        }
+
+        const blocks = parseConflicts(text);
+        if (blocks.length === 0) {
+            if (conflictDecorations.length > 0) {
+                conflictDecorations = editor.deltaDecorations(conflictDecorations, []);
+            }
+            return;
+        }
+
+        const newDecs: monaco.editor.IModelDeltaDecoration[] = [];
+
+        for (const block of blocks) {
+            const curStart = block.startLine + 1;
+            const curEnd = block.middleLine - 1;
+            if (curStart <= curEnd) {
+                newDecs.push({
+                    range: new monaco.Range(curStart, 1, curEnd, model.getLineMaxColumn(curEnd)),
+                    options: {
+                        isWholeLine: true,
+                        className: "conflict-current-decoration",
+                        linesDecorationsClassName: "conflict-current-gutter"
+                    }
+                });
+            }
+
+            const inStart = block.middleLine + 1;
+            const inEnd = block.endLine - 1;
+            if (inStart <= inEnd) {
+                newDecs.push({
+                    range: new monaco.Range(inStart, 1, inEnd, model.getLineMaxColumn(inEnd)),
+                    options: {
+                        isWholeLine: true,
+                        className: "conflict-incoming-decoration",
+                        linesDecorationsClassName: "conflict-incoming-gutter"
+                    }
+                });
+            }
+
+            newDecs.push({
+                range: new monaco.Range(block.startLine, 1, block.startLine, model.getLineMaxColumn(block.startLine)),
+                options: { isWholeLine: true, className: "conflict-marker-line conflict-marker-start" }
+            });
+            newDecs.push({
+                range: new monaco.Range(block.middleLine, 1, block.middleLine, model.getLineMaxColumn(block.middleLine)),
+                options: { isWholeLine: true, className: "conflict-marker-line conflict-marker-mid" }
+            });
+            newDecs.push({
+                range: new monaco.Range(block.endLine, 1, block.endLine, model.getLineMaxColumn(block.endLine)),
+                options: { isWholeLine: true, className: "conflict-marker-line conflict-marker-end" }
+            });
+        }
+
+        conflictDecorations = editor.deltaDecorations(conflictDecorations, newDecs);
+    }
+
+    function applyConflictResolution(blockId: string, choice: "current" | "incoming" | "both") {
+        if (!editor) return;
+        const model = editor.getModel();
+        if (!model) return;
+
+        const text = model.getValue();
+        const blocks = parseConflicts(text);
+        const block = blocks.find(b => b.id === blockId) || blocks[0];
+        if (!block) return;
+
+        let replacement = "";
+        if (choice === "current") {
+            replacement = block.currentContent;
+        } else if (choice === "incoming") {
+            replacement = block.incomingContent;
+        } else {
+            const c = block.currentContent;
+            const i = block.incomingContent;
+            replacement = c && i ? `${c}\n${i}` : (c || i);
+        }
+
+        const range = new monaco.Range(
+            block.startLine,
+            1,
+            block.endLine,
+            model.getLineMaxColumn(block.endLine)
+        );
+
+        editor.executeEdits("git-conflict-resolver", [
+            {
+                range,
+                text: replacement
+            }
+        ]);
+
+        const curFile = get(activeFile);
+        if (curFile) {
+            updateFileContent(curFile.path, model.getValue());
+        }
+
+        updateConflictDecorations(model);
+
+        setTimeout(() => {
+            const remaining = parseConflicts(model.getValue());
+            if (remaining.length === 0 && curFile) {
+                notify.success(`All conflicts resolved in "${curFile.name}"!`, {
+                    actions: [
+                        {
+                            label: "Mark Resolved (Stage)",
+                            primary: true,
+                            onClick: () => {
+                                void markConflictResolved(curFile.path);
+                            }
+                        }
+                    ]
+                });
+            }
+        }, 100);
+    }
+
+    function compareConflictBlock(block: ConflictBlock) {
+        const curFile = get(activeFile);
+        activeDiff.set({
+            id: `diff:conflict:${block.id}`,
+            filePath: curFile ? curFile.path : "",
+            relativePath: curFile ? curFile.name : "Conflict",
+            fileName: curFile ? curFile.name : "Conflict",
+            originalContent: block.currentContent,
+            modifiedContent: block.incomingContent,
+            originalLabel: block.currentLabel || "Current (HEAD)",
+            modifiedLabel: block.incomingLabel || "Incoming",
+            language: curFile ? getLanguage(curFile.name) : "plaintext",
+            mode: "working-tree",
+            baseRef: "HEAD",
+            status: "U"
+        });
+    }
+
+    function registerConflictCodeLensProvider() {
+        conflictCodeLensDisposable = monaco.languages.registerCodeLensProvider("*", {
+            provideCodeLenses: (model) => {
+                const text = model.getValue();
+                if (!text.includes("<<<<<<<")) {
+                    return { lenses: [], dispose: () => {} };
+                }
+
+                const blocks = parseConflicts(text);
+                if (blocks.length === 0) {
+                    return { lenses: [], dispose: () => {} };
+                }
+
+                const lenses: monaco.languages.CodeLens[] = [];
+
+                for (const block of blocks) {
+                    const range = {
+                        startLineNumber: block.startLine,
+                        startColumn: 1,
+                        endLineNumber: block.startLine,
+                        endColumn: 1
+                    };
+
+                    lenses.push(
+                        {
+                            range,
+                            command: {
+                                id: "craftale.git.acceptCurrent",
+                                title: "Accept Current Change",
+                                arguments: [block.id]
+                            }
+                        },
+                        {
+                            range,
+                            command: {
+                                id: "craftale.git.acceptIncoming",
+                                title: "Accept Incoming Change",
+                                arguments: [block.id]
+                            }
+                        },
+                        {
+                            range,
+                            command: {
+                                id: "craftale.git.acceptBoth",
+                                title: "Accept Both Changes",
+                                arguments: [block.id]
+                            }
+                        },
+                        {
+                            range,
+                            command: {
+                                id: "craftale.git.compareConflict",
+                                title: "Compare Changes",
+                                arguments: [block]
+                            }
+                        }
+                    );
+                }
+
+                return { lenses, dispose: () => {} };
+            }
+        });
+
+        monaco.editor.registerCommand("craftale.git.acceptCurrent", (_accessor, blockId) => {
+            applyConflictResolution(blockId, "current");
+        });
+        monaco.editor.registerCommand("craftale.git.acceptIncoming", (_accessor, blockId) => {
+            applyConflictResolution(blockId, "incoming");
+        });
+        monaco.editor.registerCommand("craftale.git.acceptBoth", (_accessor, blockId) => {
+            applyConflictResolution(blockId, "both");
+        });
+        monaco.editor.registerCommand("craftale.git.compareConflict", (_accessor, block) => {
+            compareConflictBlock(block);
+        });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Show File
     |--------------------------------------------------------------------------
     */
@@ -409,6 +640,8 @@
 
         switchingModel =
             false;
+
+        updateConflictDecorations(model);
 
         const lang = getLanguage(file.name);
         void lspManager.notifyDocumentOpen(file.path, lang, file.content);
@@ -1731,6 +1964,9 @@
                             4,
 
                         insertSpaces:
+                            true,
+
+                        codeLens:
                             true
 
                     }
@@ -1744,6 +1980,7 @@
             */
 
             registerMonacoLspAdapters();
+            registerConflictCodeLensProvider();
 
             /* Format Document: Shift + Alt + F */
             editor.addCommand(
@@ -2053,6 +2290,8 @@
                             currentEnclosingSymbol.set(findEnclosingSymbol(syms, pos.lineNumber));
                         }
 
+                        updateConflictDecorations(model);
+
                     }
                 );
 
@@ -2201,6 +2440,8 @@
             cursorDisposable?.dispose();
 
             openerDisposable?.dispose();
+
+            conflictCodeLensDisposable?.dispose();
 
             jumpRequestUnsubscribe?.();
 
@@ -3345,6 +3586,40 @@
         opacity: 0.7;
         font-size: 10px;
         margin-left: 4px;
+    }
+
+    /* Conflict Decorations */
+    :global(.conflict-current-decoration) {
+        background: rgba(46, 160, 67, 0.18) !important;
+    }
+
+    :global(.conflict-incoming-decoration) {
+        background: rgba(31, 111, 235, 0.18) !important;
+    }
+
+    :global(.conflict-marker-line) {
+        background: rgba(255, 255, 255, 0.1) !important;
+        font-weight: 700 !important;
+    }
+
+    :global(.conflict-marker-start) {
+        border-top: 1px dashed #2ea043;
+    }
+
+    :global(.conflict-marker-mid) {
+        border-top: 1px dashed #cccccc;
+    }
+
+    :global(.conflict-marker-end) {
+        border-bottom: 1px dashed #1f6feb;
+    }
+
+    :global(.conflict-current-gutter) {
+        border-left: 3px solid #2ea043;
+    }
+
+    :global(.conflict-incoming-gutter) {
+        border-left: 3px solid #1f6feb;
     }
 
 </style>

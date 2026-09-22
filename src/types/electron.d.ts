@@ -436,6 +436,23 @@ declare global {
                         fileName: string;
                         status: string;
                     }>;
+                    conflicts?: Array<{
+                        path: string;
+                        relativePath: string;
+                        fileName: string;
+                        status: string;
+                        conflictType: string;
+                    }>;
+                    repoState?: {
+                        isMerging: boolean;
+                        isRebasing: boolean;
+                        isCherryPicking: boolean;
+                        isReverting: boolean;
+                        mergeHead: string | null;
+                        mergeBranch: string | null;
+                        rebaseOnto: string | null;
+                        rebaseHead: string | null;
+                    };
                     error?: string;
                 }>;
 
@@ -526,6 +543,83 @@ declare global {
                     createNew?: boolean
                 ): Promise<{
                     success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                createBranch(
+                    workspacePath: string,
+                    branchName: string,
+                    checkout?: boolean,
+                    startPoint?: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                deleteBranch(
+                    workspacePath: string,
+                    branchName: string,
+                    force?: boolean
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                renameBranch(
+                    workspacePath: string,
+                    oldName: string,
+                    newName: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                merge(
+                    workspacePath: string,
+                    branchName: string,
+                    options?: { noFf?: boolean; squash?: boolean }
+                ): Promise<{
+                    success: boolean;
+                    conflict?: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                abortMerge(
+                    workspacePath: string
+                ): Promise<{
+                    success: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                rebase(
+                    workspacePath: string,
+                    upstreamBranch: string
+                ): Promise<{
+                    success: boolean;
+                    conflict?: boolean;
+                    stdout?: string;
+                    stderr?: string;
+                    error?: string;
+                }>;
+
+                rebaseAction(
+                    workspacePath: string,
+                    action: "continue" | "abort" | "skip"
+                ): Promise<{
+                    success: boolean;
+                    conflict?: boolean;
                     stdout?: string;
                     stderr?: string;
                     error?: string;

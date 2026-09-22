@@ -1,6 +1,7 @@
 const { ipcMain } = require("electron");
 const { execFile } = require("child_process");
 const path = require("path");
+const fs = require("fs");
 const util = require("util");
 
 const execFilePromise = util.promisify(execFile);
@@ -73,7 +74,29 @@ handleIpc("git:init", async (event, workspacePath) => {
 |--------------------------------------------------------------------------
 */
 
+function getConflictType(x, y) {
+    if (x === "U" && y === "U") return "Both Modified";
+    if (x === "A" && y === "A") return "Both Added";
+    if (x === "D" && y === "D") return "Both Deleted";
+    if (x === "U" && y === "D") return "Deleted by Them";
+    if (x === "D" && y === "U") return "Deleted by Us";
+    if (x === "A" && y === "U") return "Added by Us";
+    if (x === "U" && y === "A") return "Added by Them";
+    return "Conflict";
+}
+
 handleIpc("git:get-status", async (event, workspacePath) => {
+    const defaultRepoState = {
+        isMerging: false,
+        isRebasing: false,
+        isCherryPicking: false,
+        isReverting: false,
+        mergeHead: null,
+        mergeBranch: null,
+        rebaseOnto: null,
+        rebaseHead: null
+    };
+
     if (!workspacePath) {
         return {
             isRepo: false,
@@ -83,7 +106,9 @@ handleIpc("git:get-status", async (event, workspacePath) => {
             behind: 0,
             staged: [],
             unstaged: [],
-            untracked: []
+            untracked: [],
+            conflicts: [],
+            repoState: defaultRepoState
         };
     }
 
@@ -98,8 +123,81 @@ handleIpc("git:get-status", async (event, workspacePath) => {
             behind: 0,
             staged: [],
             unstaged: [],
-            untracked: []
+            untracked: [],
+            conflicts: [],
+            repoState: defaultRepoState
         };
+    }
+
+    /* Check active repo operations (merge, rebase, cherry-pick, revert) */
+    const repoState = { ...defaultRepoState };
+    try {
+        const gitDirRes = await runGit(["rev-parse", "--git-dir"], workspacePath);
+        const gitDir = gitDirRes.success
+            ? path.resolve(workspacePath, gitDirRes.stdout.trim())
+            : path.join(workspacePath, ".git");
+
+        // Merge check
+        const mergeHeadPath = path.join(gitDir, "MERGE_HEAD");
+        if (fs.existsSync(mergeHeadPath)) {
+            repoState.isMerging = true;
+            try {
+                repoState.mergeHead = fs.readFileSync(mergeHeadPath, "utf8").trim().slice(0, 7);
+                const mergeMsgPath = path.join(gitDir, "MERGE_MSG");
+                if (fs.existsSync(mergeMsgPath)) {
+                    const msg = fs.readFileSync(mergeMsgPath, "utf8");
+                    const branchMatch = msg.match(/Merge branch '([^']+)'/);
+                    repoState.mergeBranch = branchMatch ? branchMatch[1] : null;
+                }
+            } catch {
+                // Ignore read errors
+            }
+        }
+
+        // Rebase check
+        const rebaseMergePath = path.join(gitDir, "rebase-merge");
+        const rebaseApplyPath = path.join(gitDir, "rebase-apply");
+        if (fs.existsSync(rebaseMergePath)) {
+            repoState.isRebasing = true;
+            try {
+                const headNamePath = path.join(rebaseMergePath, "head-name");
+                if (fs.existsSync(headNamePath)) {
+                    repoState.rebaseHead = fs.readFileSync(headNamePath, "utf8").trim().replace(/^refs\/heads\//, "");
+                }
+                const ontoPath = path.join(rebaseMergePath, "onto");
+                if (fs.existsSync(ontoPath)) {
+                    repoState.rebaseOnto = fs.readFileSync(ontoPath, "utf8").trim().slice(0, 7);
+                }
+            } catch {
+                // Ignore read errors
+            }
+        } else if (fs.existsSync(rebaseApplyPath)) {
+            repoState.isRebasing = true;
+            try {
+                const headNamePath = path.join(rebaseApplyPath, "head-name");
+                if (fs.existsSync(headNamePath)) {
+                    repoState.rebaseHead = fs.readFileSync(headNamePath, "utf8").trim().replace(/^refs\/heads\//, "");
+                }
+                const ontoPath = path.join(rebaseApplyPath, "onto");
+                if (fs.existsSync(ontoPath)) {
+                    repoState.rebaseOnto = fs.readFileSync(ontoPath, "utf8").trim().slice(0, 7);
+                }
+            } catch {
+                // Ignore read errors
+            }
+        }
+
+        // Cherry-pick check
+        if (fs.existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))) {
+            repoState.isCherryPicking = true;
+        }
+
+        // Revert check
+        if (fs.existsSync(path.join(gitDir, "REVERT_HEAD"))) {
+            repoState.isReverting = true;
+        }
+    } catch {
+        // Ignore git dir inspect errors
     }
 
     /* Run git status */
@@ -114,7 +212,9 @@ handleIpc("git:get-status", async (event, workspacePath) => {
             behind: 0,
             staged: [],
             unstaged: [],
-            untracked: []
+            untracked: [],
+            conflicts: [],
+            repoState
         };
     }
 
@@ -128,6 +228,7 @@ handleIpc("git:get-status", async (event, workspacePath) => {
     const staged = [];
     const unstaged = [];
     const untracked = [];
+    const conflicts = [];
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -189,6 +290,19 @@ handleIpc("git:get-status", async (event, workspacePath) => {
             continue;
         }
 
+        /* Unmerged / Conflicted files (UU, AA, DD, UD, DU, AU, UA) */
+        const isConflict = x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D");
+        if (isConflict) {
+            conflicts.push({
+                path: fullPath,
+                relativePath: relPath.replace(/\\/g, "/"),
+                fileName,
+                status: `${x}${y}`,
+                conflictType: getConflictType(x, y)
+            });
+            continue;
+        }
+
         /* Staged changes (X is not space or ?) */
         if (x !== " " && x !== "?") {
             staged.push({
@@ -218,7 +332,9 @@ handleIpc("git:get-status", async (event, workspacePath) => {
         behind,
         staged,
         unstaged,
-        untracked
+        untracked,
+        conflicts,
+        repoState
     };
 });
 
@@ -387,6 +503,146 @@ handleIpc("git:checkout", async (event, workspacePath, branchName, createNew = f
     } else {
         return await runGit(["checkout", clean], workspacePath);
     }
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Create Branch
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:create-branch", async (event, workspacePath, branchName, checkout = true, startPoint = "HEAD") => {
+    if (!workspacePath || !branchName || !branchName.trim()) {
+        return { success: false, error: "Branch name is required" };
+    }
+
+    const clean = branchName.trim();
+    const args = checkout
+        ? ["checkout", "-b", clean, startPoint]
+        : ["branch", clean, startPoint];
+
+    return await runGit(args, workspacePath);
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Delete Branch
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:delete-branch", async (event, workspacePath, branchName, force = false) => {
+    if (!workspacePath || !branchName || !branchName.trim()) {
+        return { success: false, error: "Branch name is required" };
+    }
+
+    const flag = force ? "-D" : "-d";
+    return await runGit(["branch", flag, branchName.trim()], workspacePath);
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Rename Branch
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:rename-branch", async (event, workspacePath, oldName, newName) => {
+    if (!workspacePath || !newName || !newName.trim()) {
+        return { success: false, error: "New branch name is required" };
+    }
+
+    const args = oldName && oldName.trim()
+        ? ["branch", "-m", oldName.trim(), newName.trim()]
+        : ["branch", "-m", newName.trim()];
+
+    return await runGit(args, workspacePath);
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Merge Branch
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:merge", async (event, workspacePath, branchName, options = {}) => {
+    if (!workspacePath || !branchName || !branchName.trim()) {
+        return { success: false, error: "Branch name is required" };
+    }
+
+    const args = ["merge", branchName.trim()];
+    if (options.noFf) args.push("--no-ff");
+    if (options.squash) args.push("--squash");
+
+    const res = await runGit(args, workspacePath);
+    const combinedOutput = `${res.stdout || ""} ${res.stderr || ""}`;
+    const isConflict = combinedOutput.includes("CONFLICT") || combinedOutput.includes("Automatic merge failed");
+
+    return {
+        success: res.success,
+        conflict: isConflict,
+        stdout: res.stdout,
+        stderr: res.stderr,
+        error: res.error
+    };
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Abort Merge
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:abort-merge", async (event, workspacePath) => {
+    if (!workspacePath) return { success: false, error: "No workspace" };
+    return await runGit(["merge", "--abort"], workspacePath);
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Rebase Branch
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:rebase", async (event, workspacePath, upstreamBranch) => {
+    if (!workspacePath || !upstreamBranch || !upstreamBranch.trim()) {
+        return { success: false, error: "Upstream branch is required" };
+    }
+
+    const res = await runGit(["rebase", upstreamBranch.trim()], workspacePath);
+    const combinedOutput = `${res.stdout || ""} ${res.stderr || ""}`;
+    const isConflict = combinedOutput.includes("CONFLICT") || combinedOutput.includes("could not apply");
+
+    return {
+        success: res.success,
+        conflict: isConflict,
+        stdout: res.stdout,
+        stderr: res.stderr,
+        error: res.error
+    };
+});
+
+/*
+|--------------------------------------------------------------------------
+| IPC: Rebase Action (continue, abort, skip)
+|--------------------------------------------------------------------------
+*/
+
+handleIpc("git:rebase-action", async (event, workspacePath, action) => {
+    if (!workspacePath) return { success: false, error: "No workspace" };
+    if (!["continue", "abort", "skip"].includes(action)) {
+        return { success: false, error: `Invalid rebase action: ${action}` };
+    }
+
+    const res = await runGit(["rebase", `--${action}`], workspacePath);
+    const combinedOutput = `${res.stdout || ""} ${res.stderr || ""}`;
+    const isConflict = combinedOutput.includes("CONFLICT") || combinedOutput.includes("could not apply");
+
+    return {
+        success: res.success,
+        conflict: isConflict,
+        stdout: res.stdout,
+        stderr: res.stderr,
+        error: res.error
+    };
 });
 
 /*
