@@ -143,7 +143,8 @@ function createWindow() {
         }
     });
 
-    window.webContents.openDevTools();
+
+
 
 }
 
