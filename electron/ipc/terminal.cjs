@@ -163,9 +163,28 @@ ipcMain.handle(
             shell.toLowerCase().includes("powershell")
         ) {
 
-            shellArgs = [
-                "-NoLogo"
-            ];
+            const gitCompletionScript =
+                path.join(__dirname, "..", "scripts", "git-completion.ps1");
+
+            if (fs.existsSync(gitCompletionScript)) {
+
+                const safePath = gitCompletionScript.replace(/'/g, "''");
+
+                shellArgs = [
+                    "-NoLogo",
+                    "-NoExit",
+                    "-ExecutionPolicy", "Bypass",
+                    "-Command",
+                    `. '${safePath}'`
+                ];
+
+            } else {
+
+                shellArgs = [
+                    "-NoLogo"
+                ];
+
+            }
 
         }
 

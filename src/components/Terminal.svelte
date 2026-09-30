@@ -268,6 +268,34 @@
         xterm.open(session.container);
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Custom Key Event Handler
+        |--------------------------------------------------------------------------
+        | Prevent the browser from stealing Tab (and Shift+Tab) so the
+        | shell receives the keystroke for native tab-completion.
+        | Ctrl+Tab is excluded so it bubbles up to App for file switching.
+        |--------------------------------------------------------------------------
+        */
+
+        xterm.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+
+            // Let Ctrl+Tab / Ctrl+Shift+Tab bubble up to App for file switching
+            if (event.key === "Tab" && (event.ctrlKey || event.metaKey)) {
+                return false;
+            }
+
+            // Capture plain Tab and Shift+Tab for shell autocomplete
+            if (event.key === "Tab") {
+                return true;
+            }
+
+            // Let all other keys pass through normally
+            return true;
+
+        });
+
+
         session.xtermInstance = xterm;
 
         session.fitAddon = fitAddon;
