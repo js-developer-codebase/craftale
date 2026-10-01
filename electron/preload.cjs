@@ -337,14 +337,16 @@ contextBridge.exposeInMainWorld(
             create: (
                 cwd,
                 cols,
-                rows
+                rows,
+                options
             ) => {
 
                 return ipcRenderer.invoke(
                     "terminal:create",
                     cwd,
                     cols,
-                    rows
+                    rows,
+                    options
                 );
 
             },
@@ -770,6 +772,67 @@ contextBridge.exposeInMainWorld(
 
             runCheck: (workspacePath) => {
                 return ipcRenderer.invoke("compiler:run-check", { workspacePath });
+            }
+
+        },
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | DEBUGGER (V8 Inspector Protocol)
+        |--------------------------------------------------------------------------
+        */
+
+        debugger: {
+
+            start: (config) => {
+                return ipcRenderer.invoke("debugger:start", config);
+            },
+
+            attach: (host, port) => {
+                return ipcRenderer.invoke("debugger:attach", host, port);
+            },
+
+            stop: () => {
+                return ipcRenderer.invoke("debugger:stop");
+            },
+
+            resume: () => {
+                return ipcRenderer.invoke("debugger:resume");
+            },
+
+            pause: () => {
+                return ipcRenderer.invoke("debugger:pause");
+            },
+
+            stepOver: () => {
+                return ipcRenderer.invoke("debugger:step-over");
+            },
+
+            stepInto: () => {
+                return ipcRenderer.invoke("debugger:step-into");
+            },
+
+            stepOut: () => {
+                return ipcRenderer.invoke("debugger:step-out");
+            },
+
+            setBreakpoints: (breakpointsMap) => {
+                return ipcRenderer.invoke("debugger:set-breakpoints", breakpointsMap);
+            },
+
+            evaluate: (expression, callFrameId) => {
+                return ipcRenderer.invoke("debugger:evaluate", expression, callFrameId);
+            },
+
+            getProperties: (objectId) => {
+                return ipcRenderer.invoke("debugger:get-properties", objectId);
+            },
+
+            onEvent: (callback) => {
+                const handler = (_event, data) => callback(data);
+                ipcRenderer.on("debugger:event", handler);
+                return () => ipcRenderer.removeListener("debugger:event", handler);
             }
 
         }

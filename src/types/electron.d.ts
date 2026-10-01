@@ -189,11 +189,13 @@ declare global {
                 create(
                     cwd?: string,
                     cols?: number,
-                    rows?: number
+                    rows?: number,
+                    options?: { isDebugTerminal?: boolean }
                 ): Promise<{
                     terminalId: number;
                     shell: string;
                     pid: number;
+                    isDebugTerminal?: boolean;
                 }>;
 
 
@@ -769,6 +771,97 @@ declare global {
                     }>;
                     rawOutput?: string;
                 }>;
+
+            };
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | DEBUGGER (V8 Inspector Protocol)
+            |--------------------------------------------------------------------------
+            */
+
+            debugger: {
+
+                start(config: {
+                    programPath: string;
+                    args?: string[];
+                    cwd?: string;
+                    env?: Record<string, string>;
+                    port?: number;
+                    stopOnEntry?: boolean;
+                    breakpoints?: Record<string, number[]>;
+                }): Promise<{
+                    success: boolean;
+                    port?: number;
+                    pid?: number;
+                    program?: string;
+                    error?: string;
+                }>;
+
+                attach(
+                    host?: string,
+                    port?: number
+                ): Promise<{
+                    success: boolean;
+                    port?: number;
+                    wsUrl?: string;
+                    error?: string;
+                }>;
+
+                stop(): Promise<boolean>;
+
+                resume(): Promise<boolean>;
+
+                pause(): Promise<boolean>;
+
+                stepOver(): Promise<boolean>;
+
+                stepInto(): Promise<boolean>;
+
+                stepOut(): Promise<boolean>;
+
+                setBreakpoints(
+                    breakpointsMap: Record<string, number[]>
+                ): Promise<{
+                    success: boolean;
+                    error?: string;
+                }>;
+
+                evaluate(
+                    expression: string,
+                    callFrameId?: string
+                ): Promise<{
+                    success: boolean;
+                    result?: any;
+                    error?: string;
+                }>;
+
+                getProperties(
+                    objectId: string
+                ): Promise<{
+                    success: boolean;
+                    properties?: Array<{
+                        name: string;
+                        value?: {
+                            type: string;
+                            subtype?: string;
+                            value?: any;
+                            description?: string;
+                            objectId?: string;
+                            hasChildren?: boolean;
+                        };
+                        isEnumerable?: boolean;
+                    }>;
+                    error?: string;
+                }>;
+
+                onEvent(
+                    callback: (event: {
+                        type: "started" | "paused" | "resumed" | "console" | "exception" | "stdout" | "stderr" | "stopped" | "error";
+                        [key: string]: any;
+                    }) => void
+                ): () => void;
 
             };
 

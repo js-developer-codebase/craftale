@@ -1,6 +1,7 @@
 const {
     app,
     BrowserWindow,
+    Menu,
     ipcMain,
     dialog
 } = require("electron");
@@ -24,6 +25,9 @@ const watcherManager =
 const lspManager =
     require("./ipc/lsp.cjs");
 
+const debuggerManager =
+    require("./ipc/debugger.cjs");
+
 require("./ipc/fileSystem.cjs");
 require("./ipc/search.cjs");
 require("./ipc/git.cjs");
@@ -38,6 +42,10 @@ require("./ipc/compiler.cjs");
 
 function createWindow() {
 
+    const iconPath = process.platform === "win32"
+        ? path.join(__dirname, "../build/icon.ico")
+        : path.join(__dirname, "../build/icon.png");
+
     const window = new BrowserWindow({
 
         width: 1400,
@@ -49,6 +57,10 @@ function createWindow() {
         minHeight: 600,
 
         backgroundColor: "#1e1e1e",
+
+        icon: fs.existsSync(iconPath) ? iconPath : undefined,
+
+        autoHideMenuBar: true,
 
         webPreferences: {
 
@@ -64,6 +76,9 @@ function createWindow() {
         }
 
     });
+
+    window.removeMenu();
+    Menu.setApplicationMenu(null);
 
 
     /*
@@ -85,6 +100,10 @@ function createWindow() {
     );
 
     lspManager.initialize(
+        window
+    );
+
+    debuggerManager.initialize(
         window
     );
 
@@ -207,6 +226,8 @@ app.on(
         watcherManager.stopWatching();
 
         lspManager.stopAllServers();
+
+        debuggerManager.sessionManager.stop();
 
 
         if (

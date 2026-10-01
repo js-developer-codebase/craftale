@@ -1,6 +1,6 @@
 import { writable, get } from "svelte/store";
 
-export type BottomPanelTab = "problems" | "terminal";
+export type BottomPanelTab = "problems" | "terminal" | "debugConsole";
 
 export const activeBottomTab = writable<BottomPanelTab>("terminal");
 export const isBottomPanelVisible = writable<boolean>(false);

@@ -14,6 +14,7 @@
         activeBottomTab
     } from "../stores/panel";
     import { problemsSummary } from "../stores/problems";
+    import { debugStatus } from "../stores/debugger";
 
     const dirtyCount = $derived($openedFiles.filter((f) => f.isDirty).length);
 </script>
@@ -83,6 +84,28 @@
             {#if $isGitRepo && $totalChangesCount > 0}
                 <span class="badge git" title={`${$totalChangesCount} pending changes`}>
                     {$totalChangesCount > 99 ? "99+" : $totalChangesCount}
+                </span>
+            {/if}
+        </button>
+
+        <!-- Run and Debug Button -->
+        <button
+            type="button"
+            class="action-item"
+            class:active={$isSidebarVisible && $activeSidebarView === "debug"}
+            title="Run and Debug (Ctrl+Shift+D)"
+            onclick={() => toggleSidebarView("debug")}
+            aria-label="Run and Debug"
+        >
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <!-- Bug icon -->
+                <path d="M9 9h6v6H9z"/>
+                <path d="M12 3v3M12 18v3M4 10l3 1M20 10l-3 1M4 14l3-1M20 14l-3-1M7 6l2 2M17 6l-2 2"/>
+            </svg>
+
+            {#if $debugStatus !== "inactive"}
+                <span class="badge" class:warning={$debugStatus === "paused"} class:dirty={$debugStatus === "running"}>
+                    {$debugStatus === "paused" ? "⏸" : "▶"}
                 </span>
             {/if}
         </button>

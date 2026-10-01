@@ -7,6 +7,11 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 
+let debuggerManager = null;
+try {
+    debuggerManager = require("./debugger.cjs");
+} catch {}
+
 
 /*
 |--------------------------------------------------------------------------
@@ -99,7 +104,8 @@ ipcMain.handle(
         event,
         cwd,
         cols,
-        rows
+        rows,
+        options = {}
     ) => {
 
         const terminalId =
@@ -166,24 +172,29 @@ ipcMain.handle(
             const gitCompletionScript =
                 path.join(__dirname, "..", "scripts", "git-completion.ps1");
 
+            const commands = [];
+
+            if (options && options.isDebugTerminal) {
+                commands.push("$env:NODE_OPTIONS = '--inspect-brk=0'");
+            }
+
             if (fs.existsSync(gitCompletionScript)) {
-
                 const safePath = gitCompletionScript.replace(/'/g, "''");
+                commands.push(`. '${safePath}'`);
+            }
 
+            if (commands.length > 0) {
                 shellArgs = [
                     "-NoLogo",
                     "-NoExit",
                     "-ExecutionPolicy", "Bypass",
                     "-Command",
-                    `. '${safePath}'`
+                    commands.join("; ")
                 ];
-
             } else {
-
                 shellArgs = [
                     "-NoLogo"
                 ];
-
             }
 
         }
@@ -202,7 +213,10 @@ ipcMain.handle(
                 {
                     TERM: "xterm-256color",
                     COLORTERM: "truecolor"
-                }
+                },
+                (options && options.isDebugTerminal) ? {
+                    NODE_OPTIONS: "--inspect-brk=0"
+                } : {}
             );
 
 
@@ -239,6 +253,22 @@ ipcMain.handle(
 
             ptyProcess.onData(
                 (data) => {
+
+                    if (
+                        options &&
+                        options.isDebugTerminal &&
+                        debuggerManager
+                    ) {
+                        const cleanData = data.replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, "");
+                        const match = cleanData.match(/ws:\/\/(?:127\.0\.0\.1|localhost):\d+\/[a-zA-Z0-9-]+/);
+                        if (match && sender && !sender.isDestroyed()) {
+                            const wsUrl = match[0];
+                            console.log(`[DEBUG TERMINAL] Detected Node inspector: ${wsUrl}`);
+                            debuggerManager.sessionManager.attachWs(wsUrl, sender).catch((err) => {
+                                console.error(`[DEBUG TERMINAL] Failed to attach:`, err);
+                            });
+                        }
+                    }
 
                     if (
                         sender &&
@@ -347,7 +377,8 @@ ipcMain.handle(
             return {
                 terminalId: terminalId,
                 shell: shell,
-                pid: ptyProcess.pid
+                pid: ptyProcess.pid,
+                isDebugTerminal: !!options?.isDebugTerminal
             };
 
         } catch (error) {

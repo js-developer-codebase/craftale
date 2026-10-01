@@ -20,14 +20,17 @@
     "appId": "com.craftale.ide",
     "productName": "Craftale",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "build/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]

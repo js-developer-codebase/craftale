@@ -54,6 +54,7 @@
         xtermInstance: XTerm | null;
         fitAddon: FitAddon | null;
         container: HTMLDivElement | null;
+        isDebugTerminal?: boolean;
     }
 
 
@@ -155,19 +156,20 @@
     |--------------------------------------------------------------------------
     */
 
-    async function createNewSession(targetCwd?: string) {
+    async function createNewSession(targetCwd?: string, isDebugTerminal = false) {
 
         const sessionNumber = nextSessionNumber++;
 
         const newSession: TerminalSession = {
             id: sessionNumber,
             terminalId: null,
-            title: `${sessionNumber}: PowerShell`,
-            shellName: "PowerShell",
+            title: isDebugTerminal ? `${sessionNumber}: 🐞 JS Debug` : `${sessionNumber}: PowerShell`,
+            shellName: isDebugTerminal ? "JS Debug" : "PowerShell",
             status: "initializing",
             xtermInstance: null,
             fitAddon: null,
-            container: null
+            container: null,
+            isDebugTerminal
         };
 
 
@@ -355,7 +357,8 @@
                 await window.craftale.terminal.create(
                     initialDir,
                     cols,
-                    rows
+                    rows,
+                    { isDebugTerminal: !!session.isDebugTerminal }
                 );
 
 
@@ -807,6 +810,11 @@
 
         }
 
+        const handleCreateDebugTerminal = () => {
+            void createNewSession(undefined, true);
+        };
+        window.addEventListener("craftale:create-debug-terminal", handleCreateDebugTerminal);
+
     });
 
 
@@ -817,6 +825,8 @@
     */
 
     onDestroy(() => {
+
+        window.removeEventListener("craftale:create-debug-terminal", () => {});
 
         if (resizeDebounceTimer) {
 
@@ -879,7 +889,11 @@
                     title={session.title}
                 >
 
-                    <span class="tab-icon">&gt;_</span>
+                    {#if session.isDebugTerminal}
+                        <span class="tab-icon debug">🐞</span>
+                    {:else}
+                        <span class="tab-icon">&gt;_</span>
+                    {/if}
 
                     <span class="tab-title">{session.title}</span>
 
@@ -919,6 +933,17 @@
                 aria-label="New Terminal"
             >
                 +
+            </button>
+
+            <!-- Add JavaScript Debug Terminal Button (🐞) -->
+            <button
+                type="button"
+                class="tab-add-button debug"
+                onclick={() => createNewSession(undefined, true)}
+                title="New JavaScript Debug Terminal"
+                aria-label="New JavaScript Debug Terminal"
+            >
+                🐞
             </button>
 
         </div>
@@ -1126,6 +1151,20 @@
     .tab-add-button:hover {
         background: #3a3a3a;
         color: #ffffff;
+    }
+
+    .tab-add-button.debug {
+        font-size: 13px;
+        color: #eab308;
+    }
+
+    .tab-add-button.debug:hover {
+        background: rgba(234, 179, 8, 0.2);
+    }
+
+    .tab-icon.debug {
+        font-size: 12px;
+        filter: drop-shadow(0 0 2px rgba(234, 179, 8, 0.6));
     }
 
     /* Actions */

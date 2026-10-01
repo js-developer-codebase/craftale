@@ -83,6 +83,13 @@
     import DiffViewer from "./DiffViewer.svelte";
     import { parseConflicts, resolveConflict, type ConflictBlock } from "../utils/conflictParser";
     import { markConflictResolved } from "../stores/git";
+    import {
+        breakpoints,
+        activeExecutionLocation,
+        toggleBreakpoint,
+        debugStatus,
+        evaluateForHover
+    } from "../stores/debugger";
 
 
     /*
@@ -373,6 +380,7 @@
 
     let conflictDecorations: string[] = [];
     let conflictCodeLensDisposable: monaco.IDisposable | null = null;
+    let debugHoverDisposable: monaco.IDisposable | null = null;
 
     function updateConflictDecorations(model: monaco.editor.ITextModel | null) {
         if (!editor || !model) return;
@@ -437,6 +445,137 @@
         }
 
         conflictDecorations = editor.deltaDecorations(conflictDecorations, newDecs);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Debugger Breakpoint & Execution Pointer Decorations
+    |--------------------------------------------------------------------------
+    */
+
+    let debugDecorations: string[] = [];
+
+    function updateDebuggerDecorations() {
+        if (!editor) return;
+        const curFile = get(activeFile);
+        if (!curFile) {
+            if (debugDecorations.length > 0) {
+                debugDecorations = editor.deltaDecorations(debugDecorations, []);
+            }
+            return;
+        }
+
+        const newDecs: monaco.editor.IModelDeltaDecoration[] = [];
+        const normCurPath = normalizePath(curFile.path);
+
+        // 1. Breakpoints in current file
+        const allBps = get(breakpoints);
+        for (const [bpPath, lines] of allBps.entries()) {
+            if (normalizePath(bpPath) === normCurPath) {
+                for (const line of lines) {
+                    newDecs.push({
+                        range: new monaco.Range(line, 1, line, 1),
+                        options: {
+                            isWholeLine: false,
+                            glyphMarginClassName: "debug-breakpoint-glyph",
+                            glyphMarginHoverMessage: { value: `Breakpoint: line ${line}` }
+                        }
+                    });
+                }
+            }
+        }
+
+        // 2. Active execution line (when paused)
+        const execLoc = get(activeExecutionLocation);
+        if (execLoc && normalizePath(execLoc.filePath) === normCurPath && execLoc.line > 0) {
+            newDecs.push({
+                range: new monaco.Range(execLoc.line, 1, execLoc.line, 1),
+                options: {
+                    isWholeLine: true,
+                    className: "debug-current-line-decoration",
+                    glyphMarginClassName: "debug-current-line-glyph"
+                }
+            });
+        }
+
+        debugDecorations = editor.deltaDecorations(debugDecorations, newDecs);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Debugger Hover Expression Extractor
+    |--------------------------------------------------------------------------
+    */
+
+    const JS_RESERVED_WORDS = new Set([
+        "const", "let", "var", "function", "return", "if", "else", "for", "while",
+        "do", "switch", "case", "default", "break", "continue", "class", "extends",
+        "import", "export", "from", "as", "try", "catch", "finally", "throw",
+        "new", "typeof", "instanceof", "in", "of", "void", "delete", "yield",
+        "await", "async", "debugger", "true", "false", "null", "undefined",
+        "static", "public", "private", "protected", "interface", "type", "enum",
+        "implements", "package"
+    ]);
+
+    function getExpressionAtPosition(
+        model: monaco.editor.ITextModel,
+        position: monaco.Position
+    ): { expression: string; range: monaco.IRange } | null {
+        // 1. If user has active selection covering position
+        const sel = editor?.getSelection();
+        if (
+            sel &&
+            !sel.isEmpty() &&
+            sel.startLineNumber <= position.lineNumber &&
+            sel.endLineNumber >= position.lineNumber
+        ) {
+            const isInside =
+                (position.lineNumber > sel.startLineNumber || position.column >= sel.startColumn) &&
+                (position.lineNumber < sel.endLineNumber || position.column <= sel.endColumn);
+
+            if (isInside) {
+                const text = model.getValueInRange(sel).trim();
+                if (text && text.length < 200 && !text.includes("\n")) {
+                    return { expression: text, range: sel };
+                }
+            }
+        }
+
+        // 2. Identify word under cursor
+        const wordInfo = model.getWordAtPosition(position);
+        if (!wordInfo || !wordInfo.word) return null;
+
+        // Skip language keywords or pure numbers
+        if (JS_RESERVED_WORDS.has(wordInfo.word) || /^\d/.test(wordInfo.word)) {
+            return null;
+        }
+
+        // 3. Expand leftwards across member accesses (e.g. user.name, this.count)
+        const lineContent = model.getLineContent(position.lineNumber);
+        let startCol = wordInfo.startColumn;
+        const endCol = wordInfo.endColumn;
+
+        while (startCol > 1) {
+            const charBefore = lineContent[startCol - 2];
+            if (charBefore === ".") {
+                const prevWord = model.getWordAtPosition(
+                    new monaco.Position(position.lineNumber, startCol - 2)
+                );
+                if (prevWord && prevWord.word && !JS_RESERVED_WORDS.has(prevWord.word)) {
+                    startCol = prevWord.startColumn;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        const expr = lineContent.substring(startCol - 1, endCol - 1).trim();
+        if (!expr) return null;
+
+        return {
+            expression: expr,
+            range: new monaco.Range(position.lineNumber, startCol, position.lineNumber, endCol)
+        };
     }
 
     function applyConflictResolution(blockId: string, choice: "current" | "incoming" | "both") {
@@ -1967,6 +2106,9 @@
                             true,
 
                         codeLens:
+                            true,
+
+                        glyphMargin:
                             true
 
                     }
@@ -2005,6 +2147,29 @@
                     void editor.getAction("editor.action.quickFix")?.run();
                 }
             );
+
+            /* Toggle Breakpoint: F9 */
+            editor.addCommand(
+                monaco.KeyCode.F9,
+                () => {
+                    const pos = editor.getPosition();
+                    const curFile = get(activeFile);
+                    if (pos && curFile) {
+                        toggleBreakpoint(curFile.path, pos.lineNumber);
+                    }
+                }
+            );
+
+            /* Gutter Mouse Click for Breakpoints */
+            editor.onMouseDown((e) => {
+                if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+                    const line = e.target.position?.lineNumber;
+                    const curFile = get(activeFile);
+                    if (line && curFile) {
+                        toggleBreakpoint(curFile.path, line);
+                    }
+                }
+            });
 
 
             /*
@@ -2227,6 +2392,30 @@
                 }
             });
 
+            /* Register Debugger Hover Provider for Variable Evaluation at Breakpoints */
+            debugHoverDisposable = monaco.languages.registerHoverProvider("*", {
+                async provideHover(model, position, token) {
+                    if (get(debugStatus) !== "paused") return null;
+
+                    const target = getExpressionAtPosition(model, position);
+                    if (!target || !target.expression) return null;
+
+                    if (token.isCancellationRequested) return null;
+
+                    const info = await evaluateForHover(target.expression);
+                    if (!info || token.isCancellationRequested) return null;
+
+                    return {
+                        range: target.range,
+                        contents: [
+                            {
+                                value: info.formatted
+                            }
+                        ]
+                    };
+                }
+            });
+
 
 
             /*
@@ -2442,6 +2631,7 @@
             openerDisposable?.dispose();
 
             conflictCodeLensDisposable?.dispose();
+            debugHoverDisposable?.dispose();
 
             jumpRequestUnsubscribe?.();
 
@@ -2489,6 +2679,13 @@
                 updateScrollButtons();
             }, 60);
         }
+    });
+
+    $effect(() => {
+        const _f = $activeFile;
+        const _b = $breakpoints;
+        const _l = $activeExecutionLocation;
+        updateDebuggerDecorations();
     });
 
 </script>
@@ -3620,6 +3817,34 @@
 
     :global(.conflict-incoming-gutter) {
         border-left: 3px solid #1f6feb;
+    }
+
+    /* Debugger Gutter Glyphs & Highlight */
+    :global(.debug-breakpoint-glyph) {
+        background: #e51400 !important;
+        width: 10px !important;
+        height: 10px !important;
+        border-radius: 50% !important;
+        margin-left: 5px;
+        margin-top: 5px;
+        box-shadow: 0 0 4px rgba(229, 20, 0, 0.8);
+        cursor: pointer;
+    }
+
+    :global(.debug-current-line-glyph) {
+        width: 0 !important;
+        height: 0 !important;
+        border-top: 6px solid transparent !important;
+        border-bottom: 6px solid transparent !important;
+        border-left: 9px solid #eab308 !important;
+        margin-left: 6px;
+        margin-top: 4px;
+        filter: drop-shadow(0 0 3px rgba(234, 179, 8, 0.9));
+    }
+
+    :global(.debug-current-line-decoration) {
+        background: rgba(234, 179, 8, 0.2) !important;
+        outline: 1px solid rgba(234, 179, 8, 0.4);
     }
 
 </style>
