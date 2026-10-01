@@ -1,6 +1,7 @@
 const {
     app,
     BrowserWindow,
+    Menu,
     ipcMain,
     dialog
 } = require("electron");
@@ -59,6 +60,8 @@ function createWindow() {
 
         icon: fs.existsSync(iconPath) ? iconPath : undefined,
 
+        autoHideMenuBar: true,
+
         webPreferences: {
 
             preload: path.join(
@@ -73,6 +76,9 @@ function createWindow() {
         }
 
     });
+
+    window.removeMenu();
+    Menu.setApplicationMenu(null);
 
 
     /*
