@@ -41,6 +41,10 @@ require("./ipc/compiler.cjs");
 
 function createWindow() {
 
+    const iconPath = process.platform === "win32"
+        ? path.join(__dirname, "../build/icon.ico")
+        : path.join(__dirname, "../build/icon.png");
+
     const window = new BrowserWindow({
 
         width: 1400,
@@ -52,6 +56,8 @@ function createWindow() {
         minHeight: 600,
 
         backgroundColor: "#1e1e1e",
+
+        icon: fs.existsSync(iconPath) ? iconPath : undefined,
 
         webPreferences: {
 
