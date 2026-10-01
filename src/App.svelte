@@ -45,6 +45,27 @@
     import ProblemsPanel
         from "./components/ProblemsPanel.svelte";
 
+    import Debugger
+        from "./components/Debugger.svelte";
+
+    import DebugToolbar
+        from "./components/DebugToolbar.svelte";
+
+    import DebugConsole
+        from "./components/DebugConsole.svelte";
+
+    import {
+        debugStatus,
+        startDebugging,
+        resumeDebugging,
+        stopDebugging,
+        stepOver,
+        stepInto,
+        stepOut,
+        restartDebugging,
+        initializeDebuggerEvents
+    } from "./stores/debugger";
+
     import {
         activeBottomTab,
         isBottomPanelVisible,
@@ -350,6 +371,75 @@
 
         }
 
+        /* Toggle Run and Debug: Ctrl + Shift + D */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "d"
+        ) {
+            event.preventDefault();
+            toggleSidebarView("debug");
+            return;
+        }
+
+        /* Toggle Debug Console: Ctrl + Shift + Y */
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.shiftKey &&
+            event.key.toLowerCase() === "y"
+        ) {
+            event.preventDefault();
+            toggleBottomPanel("debugConsole");
+            return;
+        }
+
+        /* Debugger: F5 (Start / Continue) */
+        if (event.key === "F5" && !event.ctrlKey && !event.shiftKey) {
+            event.preventDefault();
+            const status = get(debugStatus);
+            if (status === "inactive" || status === "stopped") {
+                void startDebugging();
+            } else if (status === "paused") {
+                void resumeDebugging();
+            }
+            return;
+        }
+
+        /* Debugger: Shift + F5 (Stop) */
+        if (event.key === "F5" && event.shiftKey && !event.ctrlKey) {
+            event.preventDefault();
+            void stopDebugging();
+            return;
+        }
+
+        /* Debugger: Ctrl + Shift + F5 (Restart) */
+        if (event.key === "F5" && event.shiftKey && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            void restartDebugging();
+            return;
+        }
+
+        /* Debugger: F10 (Step Over) */
+        if (event.key === "F10") {
+            event.preventDefault();
+            void stepOver();
+            return;
+        }
+
+        /* Debugger: F11 (Step Into) */
+        if (event.key === "F11" && !event.shiftKey) {
+            event.preventDefault();
+            void stepInto();
+            return;
+        }
+
+        /* Debugger: Shift + F11 (Step Out) */
+        if (event.key === "F11" && event.shiftKey) {
+            event.preventDefault();
+            void stepOut();
+            return;
+        }
+
     }
 
 
@@ -414,6 +504,7 @@
         });
 
         lspManager.init(get(workspacePath));
+        initializeDebuggerEvents();
 
         unregisterWorkspace = workspacePath.subscribe((path) => {
             if (path) {
@@ -493,6 +584,10 @@
                 <SourceControl />
             </div>
 
+            <div class="sidebar-view" class:hidden={$activeSidebarView !== "debug"}>
+                <Debugger />
+            </div>
+
         </aside>
     {/if}
 
@@ -504,6 +599,8 @@
     -->
 
     <main class="main">
+
+        <DebugToolbar />
 
 
         <!--
@@ -565,6 +662,15 @@
                     >
                         <span>TERMINAL</span>
                     </button>
+
+                    <button
+                        type="button"
+                        class="panel-tab"
+                        class:active={$activeBottomTab === "debugConsole"}
+                        onclick={() => $activeBottomTab = "debugConsole"}
+                    >
+                        <span>DEBUG CONSOLE</span>
+                    </button>
                 </div>
 
                 <div class="panel-header-actions">
@@ -588,6 +694,9 @@
                 </div>
                 <div class="panel-view" class:hidden={$activeBottomTab !== "terminal"}>
                     <Terminal cwd={$workspacePath ?? ""} />
+                </div>
+                <div class="panel-view" class:hidden={$activeBottomTab !== "debugConsole"}>
+                    <DebugConsole />
                 </div>
             </div>
 

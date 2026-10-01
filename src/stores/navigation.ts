@@ -323,7 +323,7 @@ export function requestJump(
 |--------------------------------------------------------------------------
 */
 
-export type SidebarView = "explorer" | "search" | "sourceControl";
+export type SidebarView = "explorer" | "search" | "sourceControl" | "debug";
 
 export const activeSidebarView = writable<SidebarView>("explorer");
 export const isSidebarVisible = writable<boolean>(true);

@@ -83,6 +83,11 @@
     import DiffViewer from "./DiffViewer.svelte";
     import { parseConflicts, resolveConflict, type ConflictBlock } from "../utils/conflictParser";
     import { markConflictResolved } from "../stores/git";
+    import {
+        breakpoints,
+        activeExecutionLocation,
+        toggleBreakpoint
+    } from "../stores/debugger";
 
 
     /*
@@ -437,6 +442,60 @@
         }
 
         conflictDecorations = editor.deltaDecorations(conflictDecorations, newDecs);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Debugger Breakpoint & Execution Pointer Decorations
+    |--------------------------------------------------------------------------
+    */
+
+    let debugDecorations: string[] = [];
+
+    function updateDebuggerDecorations() {
+        if (!editor) return;
+        const curFile = get(activeFile);
+        if (!curFile) {
+            if (debugDecorations.length > 0) {
+                debugDecorations = editor.deltaDecorations(debugDecorations, []);
+            }
+            return;
+        }
+
+        const newDecs: monaco.editor.IModelDeltaDecoration[] = [];
+        const normCurPath = normalizePath(curFile.path);
+
+        // 1. Breakpoints in current file
+        const allBps = get(breakpoints);
+        for (const [bpPath, lines] of allBps.entries()) {
+            if (normalizePath(bpPath) === normCurPath) {
+                for (const line of lines) {
+                    newDecs.push({
+                        range: new monaco.Range(line, 1, line, 1),
+                        options: {
+                            isWholeLine: false,
+                            glyphMarginClassName: "debug-breakpoint-glyph",
+                            glyphMarginHoverMessage: { value: `Breakpoint: line ${line}` }
+                        }
+                    });
+                }
+            }
+        }
+
+        // 2. Active execution line (when paused)
+        const execLoc = get(activeExecutionLocation);
+        if (execLoc && normalizePath(execLoc.filePath) === normCurPath && execLoc.line > 0) {
+            newDecs.push({
+                range: new monaco.Range(execLoc.line, 1, execLoc.line, 1),
+                options: {
+                    isWholeLine: true,
+                    className: "debug-current-line-decoration",
+                    glyphMarginClassName: "debug-current-line-glyph"
+                }
+            });
+        }
+
+        debugDecorations = editor.deltaDecorations(debugDecorations, newDecs);
     }
 
     function applyConflictResolution(blockId: string, choice: "current" | "incoming" | "both") {
@@ -1967,6 +2026,9 @@
                             true,
 
                         codeLens:
+                            true,
+
+                        glyphMargin:
                             true
 
                     }
@@ -2005,6 +2067,29 @@
                     void editor.getAction("editor.action.quickFix")?.run();
                 }
             );
+
+            /* Toggle Breakpoint: F9 */
+            editor.addCommand(
+                monaco.KeyCode.F9,
+                () => {
+                    const pos = editor.getPosition();
+                    const curFile = get(activeFile);
+                    if (pos && curFile) {
+                        toggleBreakpoint(curFile.path, pos.lineNumber);
+                    }
+                }
+            );
+
+            /* Gutter Mouse Click for Breakpoints */
+            editor.onMouseDown((e) => {
+                if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+                    const line = e.target.position?.lineNumber;
+                    const curFile = get(activeFile);
+                    if (line && curFile) {
+                        toggleBreakpoint(curFile.path, line);
+                    }
+                }
+            });
 
 
             /*
@@ -2489,6 +2574,13 @@
                 updateScrollButtons();
             }, 60);
         }
+    });
+
+    $effect(() => {
+        const _f = $activeFile;
+        const _b = $breakpoints;
+        const _l = $activeExecutionLocation;
+        updateDebuggerDecorations();
     });
 
 </script>
@@ -3620,6 +3712,34 @@
 
     :global(.conflict-incoming-gutter) {
         border-left: 3px solid #1f6feb;
+    }
+
+    /* Debugger Gutter Glyphs & Highlight */
+    :global(.debug-breakpoint-glyph) {
+        background: #e51400 !important;
+        width: 10px !important;
+        height: 10px !important;
+        border-radius: 50% !important;
+        margin-left: 5px;
+        margin-top: 5px;
+        box-shadow: 0 0 4px rgba(229, 20, 0, 0.8);
+        cursor: pointer;
+    }
+
+    :global(.debug-current-line-glyph) {
+        width: 0 !important;
+        height: 0 !important;
+        border-top: 6px solid transparent !important;
+        border-bottom: 6px solid transparent !important;
+        border-left: 9px solid #eab308 !important;
+        margin-left: 6px;
+        margin-top: 4px;
+        filter: drop-shadow(0 0 3px rgba(234, 179, 8, 0.9));
+    }
+
+    :global(.debug-current-line-decoration) {
+        background: rgba(234, 179, 8, 0.2) !important;
+        outline: 1px solid rgba(234, 179, 8, 0.4);
     }
 
 </style>

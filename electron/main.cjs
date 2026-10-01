@@ -24,6 +24,9 @@ const watcherManager =
 const lspManager =
     require("./ipc/lsp.cjs");
 
+const debuggerManager =
+    require("./ipc/debugger.cjs");
+
 require("./ipc/fileSystem.cjs");
 require("./ipc/search.cjs");
 require("./ipc/git.cjs");
@@ -85,6 +88,10 @@ function createWindow() {
     );
 
     lspManager.initialize(
+        window
+    );
+
+    debuggerManager.initialize(
         window
     );
 
@@ -207,6 +214,8 @@ app.on(
         watcherManager.stopWatching();
 
         lspManager.stopAllServers();
+
+        debuggerManager.sessionManager.stop();
 
 
         if (
