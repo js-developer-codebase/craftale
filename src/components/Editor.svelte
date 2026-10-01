@@ -86,7 +86,9 @@
     import {
         breakpoints,
         activeExecutionLocation,
-        toggleBreakpoint
+        toggleBreakpoint,
+        debugStatus,
+        evaluateForHover
     } from "../stores/debugger";
 
 
@@ -378,6 +380,7 @@
 
     let conflictDecorations: string[] = [];
     let conflictCodeLensDisposable: monaco.IDisposable | null = null;
+    let debugHoverDisposable: monaco.IDisposable | null = null;
 
     function updateConflictDecorations(model: monaco.editor.ITextModel | null) {
         if (!editor || !model) return;
@@ -496,6 +499,83 @@
         }
 
         debugDecorations = editor.deltaDecorations(debugDecorations, newDecs);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Debugger Hover Expression Extractor
+    |--------------------------------------------------------------------------
+    */
+
+    const JS_RESERVED_WORDS = new Set([
+        "const", "let", "var", "function", "return", "if", "else", "for", "while",
+        "do", "switch", "case", "default", "break", "continue", "class", "extends",
+        "import", "export", "from", "as", "try", "catch", "finally", "throw",
+        "new", "typeof", "instanceof", "in", "of", "void", "delete", "yield",
+        "await", "async", "debugger", "true", "false", "null", "undefined",
+        "static", "public", "private", "protected", "interface", "type", "enum",
+        "implements", "package"
+    ]);
+
+    function getExpressionAtPosition(
+        model: monaco.editor.ITextModel,
+        position: monaco.Position
+    ): { expression: string; range: monaco.IRange } | null {
+        // 1. If user has active selection covering position
+        const sel = editor?.getSelection();
+        if (
+            sel &&
+            !sel.isEmpty() &&
+            sel.startLineNumber <= position.lineNumber &&
+            sel.endLineNumber >= position.lineNumber
+        ) {
+            const isInside =
+                (position.lineNumber > sel.startLineNumber || position.column >= sel.startColumn) &&
+                (position.lineNumber < sel.endLineNumber || position.column <= sel.endColumn);
+
+            if (isInside) {
+                const text = model.getValueInRange(sel).trim();
+                if (text && text.length < 200 && !text.includes("\n")) {
+                    return { expression: text, range: sel };
+                }
+            }
+        }
+
+        // 2. Identify word under cursor
+        const wordInfo = model.getWordAtPosition(position);
+        if (!wordInfo || !wordInfo.word) return null;
+
+        // Skip language keywords or pure numbers
+        if (JS_RESERVED_WORDS.has(wordInfo.word) || /^\d/.test(wordInfo.word)) {
+            return null;
+        }
+
+        // 3. Expand leftwards across member accesses (e.g. user.name, this.count)
+        const lineContent = model.getLineContent(position.lineNumber);
+        let startCol = wordInfo.startColumn;
+        const endCol = wordInfo.endColumn;
+
+        while (startCol > 1) {
+            const charBefore = lineContent[startCol - 2];
+            if (charBefore === ".") {
+                const prevWord = model.getWordAtPosition(
+                    new monaco.Position(position.lineNumber, startCol - 2)
+                );
+                if (prevWord && prevWord.word && !JS_RESERVED_WORDS.has(prevWord.word)) {
+                    startCol = prevWord.startColumn;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        const expr = lineContent.substring(startCol - 1, endCol - 1).trim();
+        if (!expr) return null;
+
+        return {
+            expression: expr,
+            range: new monaco.Range(position.lineNumber, startCol, position.lineNumber, endCol)
+        };
     }
 
     function applyConflictResolution(blockId: string, choice: "current" | "incoming" | "both") {
@@ -2312,6 +2392,30 @@
                 }
             });
 
+            /* Register Debugger Hover Provider for Variable Evaluation at Breakpoints */
+            debugHoverDisposable = monaco.languages.registerHoverProvider("*", {
+                async provideHover(model, position, token) {
+                    if (get(debugStatus) !== "paused") return null;
+
+                    const target = getExpressionAtPosition(model, position);
+                    if (!target || !target.expression) return null;
+
+                    if (token.isCancellationRequested) return null;
+
+                    const info = await evaluateForHover(target.expression);
+                    if (!info || token.isCancellationRequested) return null;
+
+                    return {
+                        range: target.range,
+                        contents: [
+                            {
+                                value: info.formatted
+                            }
+                        ]
+                    };
+                }
+            });
+
 
 
             /*
@@ -2527,6 +2631,7 @@
             openerDisposable?.dispose();
 
             conflictCodeLensDisposable?.dispose();
+            debugHoverDisposable?.dispose();
 
             jumpRequestUnsubscribe?.();
 

@@ -31,6 +31,8 @@ class DebugSessionManager {
         this.hasResumedFromEntry = false;
         this.storedBreakpoints = {};
         this.currentWsUrl = null;
+        this.isStepRequested = false;
+        this.isManualPauseRequested = false;
     }
 
     initialize(window) {
@@ -153,7 +155,7 @@ class DebugSessionManager {
 
         // Events
         if (msg.method) {
-            console.log("[CDP EVENT]", msg.method, msg.method === "Debugger.paused" ? msg.params?.reason : "");
+            //console.log("[CDP EVENT]", msg.method, msg.method === "Debugger.paused" ? msg.params?.reason : "");
             this.handleCdpEvent(msg.method, msg.params);
         }
     }
@@ -163,20 +165,24 @@ class DebugSessionManager {
             case "Debugger.paused": {
                 this.isPaused = true;
                 const reason = params.reason || "other";
-                console.log("[CDP Debugger.paused] Reason:", reason, "hitBreakpoints:", params.hitBreakpoints);
+                const hitBreakpoints = params.hitBreakpoints || [];
+                console.log("[CDP Debugger.paused] Reason:", reason, "hitBreakpoints:", hitBreakpoints);
 
-                // Handle initial pause on entry when stopOnEntry is false
-                if (!this.hasResumedFromEntry) {
-                    if (reason === "Break on start" || (!params.hitBreakpoints || params.hitBreakpoints.length === 0)) {
-                        if (this.currentSessionConfig?.stopOnEntry) {
-                            this.hasResumedFromEntry = true;
-                        } else {
-                            // Waiting for breakpoints to be set & resume() to be called by start() or attachWs()
-                            console.log("[DEBUGGER] Paused at entry, waiting for initial resume");
-                            return;
-                        }
-                    } else {
-                        this.hasResumedFromEntry = true;
+                // If stopOnEntry is false:
+                // Only pause if this is an actual user breakpoint, an uncaught exception, a step, or manual pause
+                if (!this.currentSessionConfig?.stopOnEntry) {
+                    const isException = reason === "exception" || reason === "assert";
+                    const isUserBreakpoint = hitBreakpoints.length > 0;
+                    const isStep = this.isStepRequested;
+                    const isManualPause = this.isManualPauseRequested;
+                    this.isStepRequested = false;
+                    this.isManualPauseRequested = false;
+
+                    if (!isException && !isUserBreakpoint && !isStep && !isManualPause) {
+                        console.log("[DEBUGGER] Auto-resuming non-breakpoint pause (reason: " + reason + ", hitBps: " + hitBreakpoints.length + ")");
+                        this.isPaused = false;
+                        void this.sendCdp("Debugger.resume");
+                        return;
                     }
                 }
 
@@ -260,8 +266,8 @@ class DebugSessionManager {
 
             case "Runtime.exceptionThrown": {
                 const desc = params.exceptionDetails?.exception?.description ||
-                             params.exceptionDetails?.text ||
-                             "Uncaught Exception";
+                    params.exceptionDetails?.text ||
+                    "Uncaught Exception";
 
                 this.sendEvent("exception", {
                     text: desc,
@@ -430,7 +436,7 @@ class DebugSessionManager {
         for (const [bpKey, bpId] of this.activeBreakpoints.entries()) {
             try {
                 await this.sendCdp("Debugger.removeBreakpoint", { breakpointId: bpId });
-            } catch {}
+            } catch { }
         }
         this.activeBreakpoints.clear();
 
@@ -470,7 +476,7 @@ class DebugSessionManager {
                         lineNumber: line - 1,
                         columnNumber: 0
                     });
-                    console.log("[DEBUGGER SET BP REGEX SUCCESS]", filePath, line, res);
+                    //console.log("[DEBUGGER SET BP REGEX SUCCESS]", filePath, line, res);
                     if (res && res.breakpointId) {
                         this.activeBreakpoints.set(`${filePath}:${line}:regex`, res.breakpointId);
                     }
@@ -494,24 +500,28 @@ class DebugSessionManager {
 
     async pause() {
         if (this.isPaused) return false;
+        this.isManualPauseRequested = true;
         await this.sendCdp("Debugger.pause");
         return true;
     }
 
     async stepOver() {
         if (!this.isPaused) return false;
+        this.isStepRequested = true;
         await this.sendCdp("Debugger.stepOver");
         return true;
     }
 
     async stepInto() {
         if (!this.isPaused) return false;
+        this.isStepRequested = true;
         await this.sendCdp("Debugger.stepInto");
         return true;
     }
 
     async stepOut() {
         if (!this.isPaused) return false;
+        this.isStepRequested = true;
         await this.sendCdp("Debugger.stepOut");
         return true;
     }
@@ -575,14 +585,14 @@ class DebugSessionManager {
         if (this.ws) {
             try {
                 this.ws.close();
-            } catch {}
+            } catch { }
             this.ws = null;
         }
 
         if (this.activeProcess) {
             try {
                 this.activeProcess.kill("SIGKILL");
-            } catch {}
+            } catch { }
             this.activeProcess = null;
         }
 
@@ -592,6 +602,8 @@ class DebugSessionManager {
         this.scriptParsedMap.clear();
         this.hasResumedFromEntry = false;
         this.currentWsUrl = null;
+        this.isStepRequested = false;
+        this.isManualPauseRequested = false;
     }
 
     async attachWs(wsUrl, sender) {
@@ -603,6 +615,29 @@ class DebugSessionManager {
         this.currentWsUrl = wsUrl;
         this.currentSessionConfig = { breakpoints: this.storedBreakpoints, stopOnEntry: false };
         await this.connectWebSocket(wsUrl);
+
+        // Check if this process is an internal npm wrapper (e.g. npm-prefix.js or npm-cli.js)
+        try {
+            const evalRes = await this.sendCdp("Runtime.evaluate", {
+                expression: "process.argv && process.argv[1]",
+                returnByValue: true
+            });
+            const scriptPath = (evalRes?.result?.value || "").replace(/\\/g, "/");
+            if (
+                scriptPath.includes("npm-prefix.js") ||
+                scriptPath.includes("npm/bin/npm-prefix.js") ||
+                scriptPath.includes("npm-cli.js") ||
+                scriptPath.includes("npm/bin/npm-cli.js")
+            ) {
+                console.log(`[DEBUG TERMINAL] Auto-skipping internal npm helper: ${scriptPath}`);
+                await this.sendCdp("Runtime.runIfWaitingForDebugger");
+                await this.sendCdp("Debugger.resume");
+                return { success: true, skipped: true };
+            }
+        } catch (e) {
+            console.warn("[DEBUG TERMINAL] Error checking script argv:", e);
+        }
+
         if (this.storedBreakpoints && Object.keys(this.storedBreakpoints).length > 0) {
             await this.syncBreakpoints(this.storedBreakpoints);
         }

@@ -153,6 +153,7 @@ export function initializeDebuggerEvents() {
             }
 
             case "paused": {
+                clearHoverCache();
                 debugStatus.set("paused");
                 const frames = (event.callFrames || []) as DebugCallFrame[];
                 callFrames.set(frames);
@@ -176,6 +177,7 @@ export function initializeDebuggerEvents() {
             }
 
             case "resumed": {
+                clearHoverCache();
                 debugStatus.set("running");
                 callFrames.set([]);
                 scopeVariables.set(new Map());
@@ -207,6 +209,7 @@ export function initializeDebuggerEvents() {
             }
 
             case "stopped": {
+                clearHoverCache();
                 debugStatus.set("inactive");
                 activePort.set(null);
                 callFrames.set([]);
@@ -629,4 +632,134 @@ export async function evaluateRepl(expression: string): Promise<string> {
 
 export function clearDebugLogs() {
     debugLogs.set([]);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Debug Hover Variable Evaluator
+|--------------------------------------------------------------------------
+*/
+
+const hoverCache = new Map<string, any>();
+
+export function clearHoverCache() {
+    hoverCache.clear();
+}
+
+export function formatDebugHoverValue(expression: string, result: any): string {
+    if (!result) return "";
+
+    const type = result.type;
+    const subtype = result.subtype;
+    const val = result.value;
+
+    if (subtype === "null") {
+        return `\`\`\`javascript\n${expression}: null\n\`\`\`\n*🐞 Debugger value*`;
+    }
+    if (type === "undefined") {
+        return `\`\`\`javascript\n${expression}: undefined\n\`\`\`\n*🐞 Debugger value*`;
+    }
+    if (type === "string") {
+        return `\`\`\`javascript\n${expression}: "${val}"\n\`\`\`\n*🐞 Debugger value*`;
+    }
+    if (type === "number" || type === "boolean") {
+        return `\`\`\`javascript\n${expression}: ${val}\n\`\`\`\n*🐞 Debugger value*`;
+    }
+    if (type === "symbol" || type === "bigint") {
+        return `\`\`\`javascript\n${expression}: ${result.description || val}\n\`\`\`\n*🐞 Debugger value*`;
+    }
+    if (type === "function") {
+        const fnDesc = result.description || "function()";
+        const firstLine = fnDesc.split("\n")[0];
+        return `\`\`\`javascript\n${expression}: ${firstLine}\n\`\`\`\n*🐞 Debugger value*`;
+    }
+
+    // Object or Array
+    if (type === "object") {
+        if (result.preview && Array.isArray(result.preview.properties)) {
+            const props = result.preview.properties;
+            const isArray = subtype === "array";
+
+            if (isArray) {
+                const elements = props.map((p: any) =>
+                    p.value !== undefined
+                        ? (p.type === "string" ? `"${p.value}"` : String(p.value))
+                        : (p.description || p.type)
+                );
+                if (elements.length <= 6) {
+                    return `\`\`\`javascript\n${expression}: [${elements.join(", ")}]\n\`\`\`\n*🐞 Debugger value*`;
+                } else {
+                    return `\`\`\`javascript\n${expression}: Array(${elements.length}) [\n  ${elements.slice(0, 10).join(",\n  ")}\n  ...\n]\n\`\`\`\n*🐞 Debugger value*`;
+                }
+            } else {
+                // Object with preview properties
+                const formatted = props.map((p: any) => {
+                    let propVal = p.value !== undefined ? p.value : (p.description || p.type);
+                    if (p.type === "string") propVal = `"${propVal}"`;
+                    return `  ${p.name}: ${propVal}`;
+                });
+                return `\`\`\`javascript\n${expression}: {\n${formatted.join(",\n")}\n}\n\`\`\`\n*🐞 Debugger value*`;
+            }
+        }
+
+        // Fallback description
+        return `\`\`\`javascript\n${expression}: ${result.description || "{...}"}\n\`\`\`\n*🐞 Debugger value*`;
+    }
+
+    return `\`\`\`javascript\n${expression}: ${result.description || String(val)}\n\`\`\`\n*🐞 Debugger value*`;
+}
+
+export interface DebugHoverInfo {
+    expression: string;
+    formatted: string;
+    type?: string;
+}
+
+export async function evaluateForHover(expression: string): Promise<DebugHoverInfo | null> {
+    const trimmed = expression.trim();
+    if (!trimmed || !window.craftale?.debugger) return null;
+
+    if (get(debugStatus) !== "paused") return null;
+
+    const frame = get(selectedFrame);
+    if (!frame || !frame.id) return null;
+
+    // Check cache
+    const cacheKey = `${frame.id}:${trimmed}`;
+    if (hoverCache.has(cacheKey)) {
+        const cached = hoverCache.get(cacheKey);
+        if (!cached) return null;
+        return {
+            expression: trimmed,
+            formatted: formatDebugHoverValue(trimmed, cached),
+            type: cached.type
+        };
+    }
+
+    try {
+        const res = await window.craftale.debugger.evaluate(trimmed, frame.id);
+        if (!res || !res.success || !res.result) {
+            hoverCache.set(cacheKey, null);
+            return null;
+        }
+
+        const r = res.result;
+
+        // If evaluation produced a ReferenceError or other error, it's not a valid variable in scope
+        if (r.subtype === "error" || r.className?.includes("Error")) {
+            hoverCache.set(cacheKey, null);
+            return null;
+        }
+
+        hoverCache.set(cacheKey, r);
+
+        return {
+            expression: trimmed,
+            formatted: formatDebugHoverValue(trimmed, r),
+            type: r.type
+        };
+    } catch {
+        hoverCache.set(cacheKey, null);
+        return null;
+    }
 }
