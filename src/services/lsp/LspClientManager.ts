@@ -101,7 +101,7 @@ class LspClientManagerClass {
             while (client.status === "starting" && Date.now() - startTime < 10000) {
                 await new Promise((r) => setTimeout(r, 100));
             }
-            return client.status === "ready" ? client : null;
+            return (client.status as string) === "ready" ? client : null;
         }
 
         const ws = this.workspacePath || (typeof window !== "undefined" ? "" : "");
