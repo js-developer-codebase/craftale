@@ -75,6 +75,38 @@
     let previousCwd =
         $state("");
 
+    /*
+    |--------------------------------------------------------------------------
+    | Context Menu & Clipboard State
+    |--------------------------------------------------------------------------
+    */
+
+    let contextMenu = $state({
+        visible: false,
+        x: 0,
+        y: 0,
+        hasSelection: false,
+        selectedText: ""
+    });
+
+    let contextMenuElement = $state<HTMLDivElement | null>(null);
+
+    let adjustedContextMenuX = $derived.by(() => {
+        if (typeof window === "undefined") return contextMenu.x;
+        const menuWidth = 190;
+        return contextMenu.x + menuWidth > window.innerWidth
+            ? Math.max(10, window.innerWidth - menuWidth - 10)
+            : contextMenu.x;
+    });
+
+    let adjustedContextMenuY = $derived.by(() => {
+        if (typeof window === "undefined") return contextMenu.y;
+        const menuHeight = 175;
+        return contextMenu.y + menuHeight > window.innerHeight
+            ? Math.max(10, window.innerHeight - menuHeight - 10)
+            : contextMenu.y;
+    });
+
 
     /*
     |--------------------------------------------------------------------------
@@ -290,6 +322,48 @@
             // Capture plain Tab and Shift+Tab for shell autocomplete
             if (event.key === "Tab") {
                 return true;
+            }
+
+            // Copy with Ctrl+C / Cmd+C when text is selected (instead of killing process with SIGINT)
+            if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+                if (xterm.hasSelection()) {
+                    if (event.type === "keydown") {
+                        const selection = xterm.getSelection();
+                        if (selection) {
+                            void copyTextToClipboard(selection);
+                            notify.info("Selection copied to clipboard");
+                        }
+                    }
+                    return false; // Prevent sending SIGINT / \x03 to terminal
+                }
+                // When nothing is selected, allow Ctrl+C to pass through as SIGINT (\x03)
+                return true;
+            }
+
+            // Copy with Ctrl+Shift+C / Cmd+Shift+C
+            if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+                if (event.type === "keydown") {
+                    const selection = xterm.getSelection();
+                    if (selection) {
+                        void copyTextToClipboard(selection);
+                        notify.info("Selection copied to clipboard");
+                    } else {
+                        const all = getAllTerminalLines(xterm);
+                        if (all) {
+                            void copyTextToClipboard(all);
+                            notify.info("All terminal lines copied to clipboard");
+                        }
+                    }
+                }
+                return false;
+            }
+
+            // Paste with Ctrl+V or Ctrl+Shift+V
+            if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") {
+                if (event.type === "keydown") {
+                    void pasteFromClipboard(session);
+                }
+                return false;
             }
 
             // Let all other keys pass through normally
@@ -609,6 +683,317 @@
 
     /*
     |--------------------------------------------------------------------------
+    | Clipboard & Copy Lines Operations
+    |--------------------------------------------------------------------------
+    */
+
+    async function copyTextToClipboard(text: string): Promise<boolean> {
+
+        if (!text) return false;
+
+        try {
+
+            if (navigator?.clipboard?.writeText) {
+
+                await navigator.clipboard.writeText(text);
+
+                return true;
+
+            }
+
+        } catch {
+
+            // Fallback below
+
+        }
+
+        try {
+
+            const textarea = document.createElement("textarea");
+
+            textarea.value = text;
+
+            textarea.style.position = "fixed";
+
+            textarea.style.left = "-9999px";
+
+            textarea.style.top = "-9999px";
+
+            document.body.appendChild(textarea);
+
+            textarea.focus();
+
+            textarea.select();
+
+            const success = document.execCommand("copy");
+
+            document.body.removeChild(textarea);
+
+            return success;
+
+        } catch (err) {
+
+            console.error("Failed to copy to clipboard:", err);
+
+            return false;
+
+        }
+
+    }
+
+
+    function getAllTerminalLines(xterm: XTerm | null): string {
+
+        if (!xterm) return "";
+
+        try {
+
+            const buffer = xterm.buffer.active;
+
+            const lines: string[] = [];
+
+            for (let i = 0; i < buffer.length; i++) {
+
+                const line = buffer.getLine(i);
+
+                if (!line) continue;
+
+                const text = line.translateToString(true);
+
+                if (line.isWrapped && lines.length > 0) {
+
+                    lines[lines.length - 1] += text;
+
+                } else {
+
+                    lines.push(text);
+
+                }
+
+            }
+
+            while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+
+                lines.pop();
+
+            }
+
+            return lines.join("\n");
+
+        } catch (err) {
+
+            console.error("Failed to read terminal buffer lines:", err);
+
+            return "";
+
+        }
+
+    }
+
+
+    async function copyActiveSession() {
+
+        const current = activeSession;
+
+        if (!current || !current.xtermInstance) return;
+
+        if (current.xtermInstance.hasSelection()) {
+
+            const text = current.xtermInstance.getSelection();
+
+            if (text) {
+
+                await copyTextToClipboard(text);
+
+                notify.info("Selection copied to clipboard");
+
+                return;
+
+            }
+
+        }
+
+        const all = getAllTerminalLines(current.xtermInstance);
+
+        if (all) {
+
+            await copyTextToClipboard(all);
+
+            notify.info("Terminal output copied to clipboard");
+
+        } else {
+
+            notify.info("Terminal is empty");
+
+        }
+
+    }
+
+
+    async function pasteFromClipboard(session: TerminalSession) {
+
+        if (!session || session.terminalId === null || session.status !== "running" || !window.craftale?.terminal) {
+
+            return;
+
+        }
+
+        try {
+
+            let text = "";
+
+            if (navigator?.clipboard?.readText) {
+
+                text = await navigator.clipboard.readText();
+
+            }
+
+            if (text) {
+
+                window.craftale.terminal.write(session.terminalId, text);
+
+            }
+
+        } catch (err) {
+
+            console.error("Failed to paste from clipboard:", err);
+
+        }
+
+    }
+
+
+    function handleTerminalContextMenu(event: MouseEvent) {
+
+        event.preventDefault();
+
+        event.stopPropagation();
+
+        const currentXterm = activeSession?.xtermInstance;
+
+        const hasSelection = currentXterm ? currentXterm.hasSelection() : false;
+
+        const selectedText = hasSelection && currentXterm ? currentXterm.getSelection() : "";
+
+        contextMenu = {
+
+            visible: true,
+
+            x: event.clientX,
+
+            y: event.clientY,
+
+            hasSelection,
+
+            selectedText
+
+        };
+
+    }
+
+
+    function closeContextMenu() {
+
+        contextMenu.visible = false;
+
+    }
+
+
+    function handleWindowClick(event: MouseEvent) {
+
+        if (contextMenu.visible && contextMenuElement && !contextMenuElement.contains(event.target as Node)) {
+
+            closeContextMenu();
+
+        }
+
+    }
+
+
+    function handleWindowKeydown(event: KeyboardEvent) {
+
+        if (contextMenu.visible && event.key === "Escape") {
+
+            closeContextMenu();
+
+        }
+
+    }
+
+
+    async function handleContextCopy() {
+
+        const text = contextMenu.selectedText || activeSession?.xtermInstance?.getSelection();
+
+        closeContextMenu();
+
+        if (text) {
+
+            await copyTextToClipboard(text);
+
+            notify.info("Selection copied to clipboard");
+
+        }
+
+    }
+
+
+    async function handleContextCopyAll() {
+
+        closeContextMenu();
+
+        const all = getAllTerminalLines(activeSession?.xtermInstance ?? null);
+
+        if (all) {
+
+            await copyTextToClipboard(all);
+
+            notify.info("All terminal lines copied to clipboard");
+
+        } else {
+
+            notify.info("Terminal is empty");
+
+        }
+
+    }
+
+
+    async function handleContextPaste() {
+
+        closeContextMenu();
+
+        if (activeSession) {
+
+            await pasteFromClipboard(activeSession);
+
+        }
+
+    }
+
+
+    function handleContextSelectAll() {
+
+        closeContextMenu();
+
+        activeSession?.xtermInstance?.selectAll();
+
+        activeSession?.xtermInstance?.focus();
+
+    }
+
+
+    function handleContextClear() {
+
+        closeContextMenu();
+
+        clearActiveSession();
+
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
     | Handle Container Resize
     |--------------------------------------------------------------------------
     */
@@ -869,6 +1254,13 @@
 </script>
 
 
+<svelte:window
+    onclick={handleWindowClick}
+    onkeydown={handleWindowKeydown}
+    oncontextmenu={handleWindowClick}
+/>
+
+
 <div class="terminal">
 
     <!-- Header / Tab Bar -->
@@ -952,6 +1344,19 @@
         <!-- Right-side Action Buttons -->
         <div class="terminal-actions">
 
+            <!-- Copy Lines / Selection -->
+            <button
+                type="button"
+                class="action-button"
+                onclick={copyActiveSession}
+                title="Copy Terminal Output / Selection"
+                aria-label="Copy Terminal Output or Selection"
+            >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4 2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6zM2 5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h-1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1V4H3a2 2 0 0 0-2 2z"/>
+                </svg>
+            </button>
+
             <!-- Clear -->
             <button
                 type="button"
@@ -993,7 +1398,11 @@
 
 
     <!-- Body with Per-Session Containers -->
-    <div class="terminal-body">
+    <div
+        class="terminal-body"
+        oncontextmenu={handleTerminalContextMenu}
+        role="presentation"
+    >
 
         {#each sessions as session (session.id)}
 
@@ -1009,6 +1418,68 @@
         {/each}
 
     </div>
+
+    <!-- Right-Click Context Menu -->
+    {#if contextMenu.visible}
+
+        <div
+            bind:this={contextMenuElement}
+            class="terminal-context-menu"
+            style="top: {adjustedContextMenuY}px; left: {adjustedContextMenuX}px;"
+            role="menu"
+            tabindex="-1"
+        >
+
+            <button
+                type="button"
+                class="menu-item"
+                class:disabled={!contextMenu.hasSelection}
+                onclick={handleContextCopy}
+            >
+                <span class="label">Copy</span>
+                <span class="shortcut">Ctrl+C</span>
+            </button>
+
+            <button
+                type="button"
+                class="menu-item"
+                onclick={handleContextCopyAll}
+            >
+                <span class="label">Copy All Lines</span>
+                <span class="shortcut">Ctrl+Shift+C</span>
+            </button>
+
+            <button
+                type="button"
+                class="menu-item"
+                onclick={handleContextPaste}
+            >
+                <span class="label">Paste</span>
+                <span class="shortcut">Ctrl+V</span>
+            </button>
+
+            <div class="divider"></div>
+
+            <button
+                type="button"
+                class="menu-item"
+                onclick={handleContextSelectAll}
+            >
+                <span class="label">Select All</span>
+            </button>
+
+            <button
+                type="button"
+                class="menu-item"
+                onclick={handleContextClear}
+            >
+                <span class="label">Clear Terminal</span>
+                <span class="shortcut">Ctrl+L</span>
+            </button>
+
+        </div>
+
+    {/if}
 
 </div>
 
@@ -1252,6 +1723,72 @@
 
     .session-container :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
         background: #555555;
+    }
+
+    /* Terminal Context Menu */
+    .terminal-context-menu {
+        position: fixed;
+        z-index: 100000;
+        width: 190px;
+        background: #252526;
+        border: 1px solid #454545;
+        border-radius: 5px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+        padding: 4px 0;
+        user-select: none;
+        outline: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .terminal-context-menu .menu-item {
+        width: 100%;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+        background: transparent;
+        border: none;
+        color: #cccccc;
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+        outline: none;
+        box-sizing: border-box;
+    }
+
+    .terminal-context-menu .menu-item:hover:not(.disabled) {
+        background: #094771;
+        color: #ffffff;
+    }
+
+    .terminal-context-menu .menu-item.disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+
+    .terminal-context-menu .label {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .terminal-context-menu .shortcut {
+        color: #888888;
+        font-size: 11px;
+        margin-left: 12px;
+        flex-shrink: 0;
+    }
+
+    .terminal-context-menu .menu-item:hover:not(.disabled) .shortcut {
+        color: #eeeeee;
+    }
+
+    .terminal-context-menu .divider {
+        height: 1px;
+        background: #3c3c3c;
+        margin: 4px 0;
     }
 
 </style>

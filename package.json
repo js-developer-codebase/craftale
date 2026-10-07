@@ -23,6 +23,9 @@
       "output": "release",
       "buildResources": "build"
     },
+    "asarUnpack": [
+      "electron/scripts/**/*"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",

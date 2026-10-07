@@ -1,5 +1,6 @@
 const {
-    ipcMain
+    ipcMain,
+    app
 } = require("electron");
 
 const pty = require("node-pty");
@@ -91,6 +92,53 @@ function getDefaultShell() {
 }
 
 
+/**
+ * Ensures git-completion.ps1 is available as a real physical file on disk.
+ * When the app is packaged inside app.asar, external processes like powershell.exe
+ * cannot read files inside the virtual asar archive directly.
+ */
+function getAccessibleGitCompletionScript() {
+    const rawPath = path.join(__dirname, "..", "scripts", "git-completion.ps1");
+
+    // 1. In development (not inside an asar archive):
+    if (!rawPath.includes("app.asar")) {
+        if (fs.existsSync(rawPath)) {
+            return rawPath;
+        }
+    }
+
+    // 2. If unpacked by electron-builder (app.asar.unpacked):
+    const unpackedPath = rawPath.replace("app.asar", "app.asar.unpacked");
+    try {
+        if (fs.existsSync(unpackedPath)) {
+            return unpackedPath;
+        }
+    } catch (_) {}
+
+    // 3. Fallback: Extract from app.asar to app userData or temp directory
+    try {
+        if (fs.existsSync(rawPath)) {
+            const userDataPath = app ? app.getPath("userData") : os.tmpdir();
+            const targetDir = path.join(userDataPath, "scripts");
+            if (!fs.existsSync(targetDir)) {
+                fs.mkdirSync(targetDir, { recursive: true });
+            }
+            const targetPath = path.join(targetDir, "git-completion.ps1");
+            const scriptContent = fs.readFileSync(rawPath, "utf8");
+
+            if (!fs.existsSync(targetPath) || fs.readFileSync(targetPath, "utf8") !== scriptContent) {
+                fs.writeFileSync(targetPath, scriptContent, "utf8");
+            }
+            return targetPath;
+        }
+    } catch (err) {
+        console.error("[TERMINAL] Failed to extract git-completion.ps1:", err);
+    }
+
+    return null;
+}
+
+
 /*
 |--------------------------------------------------------------------------
 | Create Terminal
@@ -169,8 +217,7 @@ ipcMain.handle(
             shell.toLowerCase().includes("powershell")
         ) {
 
-            const gitCompletionScript =
-                path.join(__dirname, "..", "scripts", "git-completion.ps1");
+            const gitCompletionScript = getAccessibleGitCompletionScript();
 
             const commands = [];
 
@@ -178,7 +225,7 @@ ipcMain.handle(
                 commands.push("$env:NODE_OPTIONS = '--inspect-brk=0'");
             }
 
-            if (fs.existsSync(gitCompletionScript)) {
+            if (gitCompletionScript) {
                 const safePath = gitCompletionScript.replace(/'/g, "''");
                 commands.push(`. '${safePath}'`);
             }
